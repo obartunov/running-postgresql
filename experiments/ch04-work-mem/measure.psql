@@ -1,0 +1,13 @@
+\set QUIET on
+SET application_name = 'ch04-peak';
+SET work_mem = :'wm';
+\if :serial
+SET max_parallel_workers_per_gather = 0;
+\endif
+\o /dev/null
+\i query.sql
+\o
+-- Пауза нужна, чтобы управляющий скрипт успел прочитать VmHWM этого
+-- процесса, пока он ещё жив. VmHWM — высшая точка за жизнь процесса,
+-- поэтому читать после выполнения запроса корректно.
+SELECT pg_sleep(6);

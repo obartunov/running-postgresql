@@ -5,6 +5,9 @@ set -euo pipefail
 DB=${DB:-${PGDATABASE:-bloat_bench}}
 ROWS=${ROWS:-500000}
 UPDATES=${UPDATES:-100000}
+# Место на странице под новые версии строк. Без запаса HOT невозможен
+# физически, и эксперимент измерит не индексы, а переполненные страницы.
+FILLFACTOR=${FILLFACTOR:-80}
 mkdir -p results
 
 run_case() {
@@ -17,7 +20,7 @@ CREATE TABLE cost_t (
     region  text NOT NULL,      -- эту не трогаем
     amount  numeric(12,2) NOT NULL,
     payload text NOT NULL
-);
+) WITH (fillfactor = $FILLFACTOR);
 INSERT INTO cost_t
 SELECT g, 'state-' || (g % 50), 'region-' || (g % 30),
        (random()*1000)::numeric(12,2), md5(g::text)
@@ -25,7 +28,7 @@ FROM generate_series(1, $ROWS) g;
 $IDX_SQL
 ALTER TABLE cost_t SET (autovacuum_enabled = off);
 VACUUM (ANALYZE) cost_t;
-SELECT pg_stat_reset_single_table_counters('cost_t'::regclass);
+DO \$\$ BEGIN PERFORM pg_stat_reset_single_table_counters('cost_t'::regclass); END \$\$;
 SQL
 
   local LSN0 LSN1 WAL HOT
@@ -46,7 +49,7 @@ SQL
 }
 
 {
-  echo "нагрузка: $UPDATES обновлений колонки status"
+  echo "нагрузка: $UPDATES обновлений колонки status, fillfactor = $FILLFACTOR"
   echo
   run_case "без индексов (кроме PK)"          ""
   run_case "1 индекс по НЕизменяемой колонке" \

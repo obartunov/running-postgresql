@@ -34,7 +34,11 @@ cat >> "$SRC/postgresql.conf" <<EOF
 port = $PORT
 wal_level = replica
 archive_mode = on
-archive_command = 'test ! -f $ARCHIVE/%f && cp %p $ARCHIVE/%f'
+# Копирование в архив ДОЛЖНО быть атомарным: если сервер умрёт посреди
+# cp, в архиве останется обрезанный сегмент, и восстановление на нём
+# упадёт с 'archive file has wrong size'. Пишем во временное имя и
+# переименовываем — mv в пределах файловой системы атомарен.
+archive_command = 'test ! -f $ARCHIVE/%f && cp %p $ARCHIVE/%f.tmp && mv $ARCHIVE/%f.tmp $ARCHIVE/%f'
 max_wal_size = 2GB
 unix_socket_directories = '$BASE'
 listen_addresses = 'localhost'
@@ -76,10 +80,30 @@ EOF
 touch "$DST/recovery.signal"
 
 # --- участок 3: старт и проигрывание -----------------------------------
+# ВАЖНО: сервер начинает принимать соединения, как только достигнута
+# согласованность, — то есть ЗАДОЛГО до конца проигрывания. Меряем оба
+# момента: когда отвечает и когда восстановление действительно
+# закончилось (pg_is_in_recovery() = false).
 T4=$(t)
-pg_ctl -D "$DST" -l "$BASE/restored.log" -w start
+pg_ctl -D "$DST" -l "$BASE/restored.log" start > /dev/null
 until psql -X -At -h 127.0.0.1 -p "$RPORT" -d postgres -c "SELECT 1" >/dev/null 2>&1; do
-  sleep 0.3
+  sleep 0.2
+done
+T4B=$(t)
+WAITED=0
+until [ "$(psql -X -At -h 127.0.0.1 -p "$RPORT" -d postgres \
+            -c 'SELECT pg_is_in_recovery()' 2>/dev/null)" = "f" ]; do
+  sleep 0.5; WAITED=$((WAITED+1))
+  if [ $WAITED -gt 1200 ]; then
+    echo "восстановление не завершилось за 10 минут; смотрите $BASE/restored.log" >&2
+    tail -5 "$BASE/restored.log" >&2
+    exit 1
+  fi
+  if ! pg_ctl -D "$DST" status > /dev/null 2>&1; then
+    echo "сервер восстановления упал; последние строки лога:" >&2
+    tail -5 "$BASE/restored.log" >&2
+    exit 1
+  fi
 done
 T5=$(t)
 
@@ -101,7 +125,8 @@ T9=$(t)
   echo
   printf 'снятие копии:            %6s с\n' "$(el $T0 $T1)"
   printf 'развёртывание:           %6s с\n' "$(el $T2 $T3)"
-  printf 'старт и проигрывание:    %6s с\n' "$(el $T4 $T5)"
+  printf 'старт до первого ответа: %6s с\n' "$(el $T4 $T4B)"
+  printf 'до КОНЦА проигрывания:   %6s с\n' "$(el $T4 $T5)"
   printf 'первый запрос (холодный):%6s с\n' "$(el $T6 $T7)"
   printf 'тот же запрос (тёплый):  %6s с\n' "$(el $T8 $T9)"
   echo

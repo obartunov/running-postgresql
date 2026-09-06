@@ -28,7 +28,9 @@ sleep 1
 $S -c "SHOW max_standby_streaming_delay" > "$OUT/settings.txt"
 $S -c "SHOW hot_standby_feedback"       >> "$OUT/settings.txt"
 
-$S -q -c "SELECT pg_stat_reset_shared('recovery_prefetch')" 2>/dev/null || true
+# Счётчики конфликтов на реплике накапливаются между прогонами:
+# без сброса второй прогон покажет конфликт первого.
+$S -q -c "SELECT pg_stat_reset()" > /dev/null
 
 # --- длинный запрос на реплике ----------------------------------------
 # Repeatable read: снимок держится всю транзакцию, конфликт гарантирован.
@@ -41,6 +43,16 @@ $S -q -c "SELECT pg_stat_reset_shared('recovery_prefetch')" 2>/dev/null || true
 ) &
 QJOB=$!
 sleep 3
+
+# Снимок горизонта, пока запрос на реплике ЖИВ. После его завершения
+# удержание пропадает, и в отчёте видно пусто — прежняя версия стенда
+# снимала именно так.
+$P -c "SELECT application_name, state, backend_xmin,
+              age(backend_xmin) AS xmin_age
+       FROM pg_stat_replication" > "$OUT/horizon-during.txt"
+$P -c "SELECT slot_name, active, xmin, catalog_xmin,
+              age(xmin) AS xmin_age
+       FROM pg_replication_slots" >> "$OUT/horizon-during.txt"
 
 # --- на primary: обновление и очистка ----------------------------------
 $P -q -c "UPDATE pgbench_accounts SET abalance = abalance + 1
@@ -61,6 +73,7 @@ $S -c "SELECT confl_snapshot, confl_lock, confl_bufferpin, confl_deadlock
 echo "=== настройки ===";            cat "$OUT/settings.txt"
 echo "=== запрос на реплике ===";    tail -3 "$OUT/standby-query.txt"
 echo "=== конфликты на реплике ==="; cat "$OUT/conflicts.txt"
-echo "=== состояние репликации ==="; cat "$OUT/replication.txt"
+echo "=== горизонт, пока запрос на реплике жив ==="; cat "$OUT/horizon-during.txt"
+echo "=== состояние репликации после ==="; cat "$OUT/replication.txt"
 echo "=== VACUUM на primary ==="
 grep -E 'removed|removable|oldest xmin' "$OUT/primary-vacuum.txt" || true

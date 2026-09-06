@@ -13,7 +13,18 @@ DB=${PGDATABASE:-lock_bench}
 MODE="${1:?укажите режим: naive, timeout или cancel-ddl}"
 OUT="results/$MODE"; mkdir -p "$OUT"
 
-psql -X -q -d "$DB" -f setup.sql
+# Преflight: держатель от прерванного прогона блокирует DROP TABLE в
+# setup.sql. lock_timeout превращает вечное ожидание во внятную ошибку —
+# то самое правило, которое доказывает эта глава.
+psql -X -q -d "$DB" -c "
+  SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+   WHERE application_name = 'ch03-holder' AND pid <> pg_backend_pid()" > /dev/null
+if ! PGOPTIONS='-c lock_timeout=10s' psql -X -q -v ON_ERROR_STOP=1 -d "$DB" \
+       -f setup.sql; then
+  echo "Подготовка не смогла взять блокировку: жив держатель от прерванного" >&2
+  echo "прогона. Найдите его в pg_stat_activity и снимите pg_terminate_backend." >&2
+  exit 1
+fi
 
 PIDS=()
 FIFO=$(mktemp -u); mkfifo "$FIFO"
@@ -31,7 +42,7 @@ trap cleanup EXIT
 psql -X -q -d "$DB" -f - < "$FIFO" > "$OUT/session-a.txt" 2>&1 &
 PIDS+=($!)
 exec 9>"$FIFO"
-printf 'BEGIN;\nSELECT count(*) FROM orders;\n' >&9
+printf "SET application_name='ch03-holder';\nBEGIN;\nSELECT count(*) FROM orders;\n" >&9
 sleep 2
 
 psql -X -d "$DB" -c \
@@ -47,9 +58,14 @@ B_JOB=$!; PIDS+=($B_JOB)
 sleep 2
 
 # --- C: обычный SELECT, совместимый с A, но пришедший после B ----------
-C_START=$(date +%s.%N)
-( psql -X -q -d "$DB" -c "SELECT count(*) FROM orders" \
-    > "$OUT/select.txt" 2>&1 ) &
+# Время меряется ВНУТРИ подоболочки: иначе в него попадут паузы самого
+# скрипта, и в режиме timeout мы намеряем свой же sleep вместо ожидания.
+(
+  cs=$(date +%s.%N)
+  psql -X -q -d "$DB" -c "SELECT count(*) FROM orders" > "$OUT/select.txt" 2>&1
+  ce=$(date +%s.%N)
+  echo "$ce - $cs" | bc > "$OUT/c_elapsed"
+) &
 C_JOB=$!; PIDS+=($C_JOB)
 sleep 2
 
@@ -57,24 +73,48 @@ sleep 2
 psql -X -d "$DB" -f blocked.sql > "$OUT/blocked.txt"
 psql -X -d "$DB" -f locks.sql   > "$OUT/locks.txt"
 
-# --- аварийное действие для третьего прогона ---------------------------
-if [ "$MODE" = "cancel-ddl" ]; then
-  psql -X -q -d "$DB" -c \
-    "SELECT pg_cancel_backend(pid) FROM pg_stat_activity
-     WHERE query LIKE 'ALTER TABLE orders%' AND pid <> pg_backend_pid()" \
-    > "$OUT/cancel.txt"
-fi
+# --- аварийное действие ------------------------------------------------
+case "$MODE" in
+  cancel-ddl)
+    # Снимаем МИГРАЦИЮ, а не сессию A. Очередь должна разойтись сразу,
+    # причём A остаётся жива и по-прежнему держит ACCESS SHARE.
+    psql -X -q -d "$DB" -c \
+      "SELECT pg_cancel_backend(pid) FROM pg_stat_activity
+       WHERE query LIKE 'ALTER TABLE orders%' AND pid <> pg_backend_pid()" \
+      > "$OUT/cancel.txt"
+    # Доказательство: A ЖИВА и держит ACCESS SHARE, а новый читатель
+    # проходит немедленно. Значит, очередь создавала не A, а миграция.
+    ds=$(date +%s.%N)
+    psql -X -q -d "$DB" -c "SELECT count(*) FROM orders" > /dev/null 2>&1
+    de=$(date +%s.%N)
+    echo "$de - $ds" | bc > "$OUT/d_elapsed"
+    psql -X -d "$DB" -c \
+      "SELECT pid, state, now()-xact_start AS xact_age
+       FROM pg_stat_activity WHERE state = 'idle in transaction'" \
+      > "$OUT/holder-still-alive.txt"
+    ;;
+  naive)
+    # Без ограничителя очередь не разойдётся сама: B ждёт A, C ждёт B.
+    # Отпускаем A — это и есть 'нашли и сняли виновника'.
+    printf 'COMMIT;\n' >&9
+    ;;
+esac
 
 wait $C_JOB 2>/dev/null || true
-C_END=$(date +%s.%N)
 wait $B_JOB 2>/dev/null || true
 
-# A закрывается штатно, чтобы было видно: она никуда не делась
-printf 'COMMIT;\n' >&9; exec 9>&-
+# A закрывается штатно, если ещё не закрыта: видно, что она никуда не делась
+printf 'COMMIT;\n' >&9 2>/dev/null || true
+exec 9>&- 2>/dev/null || true
 
 {
   echo "режим:                    $MODE"
-  echo "ожидание SELECT (C):      $(echo "$C_END - $C_START" | bc) с"
+  printf 'ожидание SELECT (C):      %s с\n' "$(cat "$OUT/c_elapsed" 2>/dev/null || echo '?')"
+  if [ -f "$OUT/d_elapsed" ]; then
+    printf 'новый SELECT после снятия DDL: %s с\n' "$(cat "$OUT/d_elapsed")"
+    echo "--- а сессия A всё ещё держит блокировку ---"
+    cat "$OUT/holder-still-alive.txt"
+  fi
   echo "--- состояние сессии A перед миграцией ---"; cat "$OUT/session-a-state.txt"
   echo "--- результат DDL ---";    cat "$OUT/ddl.txt"
   echo "--- результат SELECT ---"; cat "$OUT/select.txt"

@@ -136,6 +136,14 @@ PostgreSQL и внешний search. Core и extension. Storage AM и executor. 
 
 Если balance в PostgreSQL один, в cache второй, а в warehouse третий, вопрос уже не про latency. Система должна заранее знать, кто authoritative и какой freshness contract у каждой derived copy.
 
+**Это permanent architecture или временная опора?**
+
+«Костыль» сам по себе не диагноз. Spill, pool, FDW bridge, extra replica или OOM victim policy могут быть правильным способом пережить ограничение или migration. Но временная конструкция должна иметь понятный invariant, цену, owner, telemetry и условие пересмотра/выхода. Иначе она становится невидимой архитектурой.
+
+**Какой порог мы ещё не пересекли?**
+
+На маленьком dataset, при одной session или коротком run система может жить в другом физическом режиме. Значение ещё помещается inline, working set ещё целиком в cache, queue ещё не насыщена, statistics ещё случайно хорошо описывает данные. Поэтому вопрос «почему на стенде было быстро?» часто надо перевести в другой: какой threshold, saturation point или накопленный state появился только позже?
+
 ### Performance для нас длиннее одного запроса
 
 `\timing` в `psql` полезен.
@@ -555,6 +563,41 @@ NUMA microbenchmark может доказать remote-memory latency и нич�
 Day-long workload может показать, что система не выдерживает, и ничего не сказать о конкретной причине.
 
 Хорошая работа почти всегда требует обоих уровней.
+
+### Development, test и production — не три размера одного эксперимента
+
+Есть опасная фраза:
+
+```text
+у нас же это прошло тесты
+```
+
+Она ничего не говорит, пока не названа граница теста.
+
+Development environment специально устроен так, чтобы разработчику было удобно менять систему. Dataset маленький, история короткая, concurrency низкая, фоновых jobs мало, failures редки. Это не недостаток development. Если каждый локальный запуск воспроизводил бы production operating day, разработка остановилась бы.
+
+Test environment решает другую задачу: мы сознательно фиксируем часть мира, чтобы проверить hypothesis или contract воспроизводимо. Unit test может доказать semantics функции. Concurrency test — конкретную race. Mechanistic benchmark — существование физического эффекта. Operational test — устойчивость workload в выбранном operating envelope.
+
+Production отличается не тем, что там просто «данных больше». Там одновременно появляются измерения, которые на стенде мы обычно разделяем:
+
+```text
+data size and distribution
+× concurrency and arrival pattern
+× accumulated history
+× background work
+× cache / planner / session state
+× failures and recovery
+× human operations
+× time
+```
+
+Именно произведение этих факторов создаёт новые режимы. JSON value пересёк storage threshold. Несколько безопасных queries одновременно вошли в memory-heavy phase. Один idle transaction совпал с DDL. Реплика встретила burst WAL в тот момент, когда analytics держит старый snapshot.
+
+Поэтому тест не является уменьшенной копией production. Это **выбранная проекция production state space**. Хороший test явно говорит, какую часть пространства он покрывает и какой вопрос не покрывает.
+
+Отсюда ещё одно правило книги:
+
+> Если production опроверг test, сначала ищите не «почему test был плохой», а **какое измерение или threshold отсутствовали в его модели**.
 
 ### Что мы будем писать рядом с числом
 
@@ -1131,6 +1174,120 @@ file size почти не изменился
 > **Запомнить.** когда autovacuum постоянно занят, сначала спросите не «сколько ещё workers дать», а «ему не хватает мощности или ему запрещено удалять?».
 
 > **Сверить в своей версии.** конкретные autovacuum scheduling/scoring views и parallel-vacuum behavior. MVCC horizon, старая transaction и различие reusable space/physical shrink — фундаментальны для этой книги.
+
+
+## Интермеццо. Я добавил индекс. Почему UPDATE стал дороже?
+
+Индекс обычно появляется в разговоре как лекарство от медленного чтения.
+
+Нашли запрос, добавили B-tree, SELECT стал быстрее.
+
+Очень легко закончить рассуждение здесь.
+
+Но индекс — это не только ускорение будущего чтения. Это ещё и обязательство обслуживать будущие изменения.
+
+### Цена индекса проявляется на следующем UPDATE
+
+Для update-heavy таблицы особенно важна связь с HOT.
+
+Если UPDATE не меняет значения, от которых зависят indexes, и новая tuple version помещается на той же heap page, PostgreSQL может не создавать новые index entries. Мы уже видели это в предыдущей главе: HOT уменьшает не cleanup потом, а сам объём будущего index debt.
+
+Но индекс на часто изменяемой колонке меняет эту возможность.
+
+Тогда один logical UPDATE может означать:
+
+```text
+new heap tuple version
++
+new index entries
++
+more WAL
++
+future index cleanup
+```
+
+Именно поэтому вопрос «сколько indexes у таблицы?» слишком грубый. Важнее:
+
+**какие из них зависят от колонок, которые workload действительно меняет?**
+
+### Наш прогон: один индекс изменил режим UPDATE
+
+В одном из стендов это было видно сразу по нескольким независимым следам.
+
+После первоначальной сборки измеренная плотность index pages была около 89.9%. После серии UPDATE с VACUUM она упала примерно до 61.6%, а размер index примерно удвоился.
+
+Но ещё важнее был не сам размер.
+
+При варианте без лишнего index доля HOT updates была около 68%, а WAL на один UPDATE — около 145.7 bytes. После добавления index, который делал обновления index-relevant, HOT почти исчез — около 1.3%, а WAL вырос примерно до 537.0 bytes/update.
+
+Это числа конкретного стенда, не универсальные коэффициенты PostgreSQL. Их ценность в другом: один schema object одновременно изменил три observable свойства системы:
+
+```text
+HOT eligibility
+      ↓
+index maintenance work
+      ↓
+WAL + future cleanup debt
+```
+
+То есть «лишний индекс» — не эстетическая проблема каталога. Он способен изменить operating regime write workload.
+
+### VACUUM освобождает место, но не обязан вернуть index в состояние новой сборки
+
+После UPDATE старые index entries со временем становятся removable/reusable. VACUUM может очистить то, что уже безопасно удалить.
+
+Но это не означает, что B-tree обязан снова иметь ту же physical density и размер, что сразу после компактной build. История splits, page occupancy и pattern изменений остаётся частью physical state.
+
+Поэтому index bloat и table bloat надо измерять отдельно.
+
+И `REINDEX` — уже другая операция: мы платим новой физической build, временными ресурсами и coordination ради компактного нового representation.
+
+### Как решать, нужен ли индекс
+
+Не так:
+
+```text
+этот SELECT быстрее с index
+=> index нужен
+```
+
+А хотя бы так:
+
+```text
+read benefit
+versus
+write amplification
++ HOT loss
++ WAL
++ maintenance/rebuild cost
++ disk/cache footprint
+```
+
+Для read-mostly relation первая сторона может полностью доминировать.
+
+Для update-heavy relation тот же index может оказаться дорогим даже при очень хорошем локальном speedup одного SELECT.
+
+### Эксперимент: индекс должен заплатить за себя
+
+Для критичного candidate index полезно сравнить два одинаковых workload run.
+
+A. Без candidate index.
+
+B. С candidate index.
+
+Пишем не только latency нужного SELECT:
+
+- read latency / plans;
+- `n_tup_upd` и `n_tup_hot_upd`;
+- WAL bytes на одинаковый update batch;
+- размер heap и каждого index;
+- изменение physical density, если используем подходящий диагностический инструмент;
+- VACUUM/REINDEX work;
+- replica/archiving consequence, если WAL уходит дальше primary.
+
+И только потом решаем, окупается ли read path ценой write path.
+
+> **Запомнить.** индекс — это не бесплатное знание. Он ускоряет часть будущих reads, потому что мы согласились поддерживать дополнительное physical state при writes.
 
 ## Глава 3. Я добавил колонку, и база встала
 
@@ -1872,6 +2029,10 @@ reclaim или swap. p99 OLTP улетел. В худшем случае при�
 
 Какой trade мы получаем между query latency, memory headroom и конкуренцией с остальным workload?
 
+Здесь полезно снять ещё одно инженерное предубеждение. Temp file или spill часто называют костылём: «настоящая быстрая система всё должна держать в памяти». Но в живой системе временный ресурс может быть сознательным **pressure valve**. Мы разрешаем отдельной операции стать медленнее и занять disk, чтобы не позволить множеству операций одновременно превратить memory pressure в database-wide failure.
+
+Это не делает любой spill хорошим. Если temp растёт без границы и I/O queue сама убивает SLA, pressure valve превратился в следующий bottleneck. Но сам факт временного ресурса не является дефектом. Важны его предел, наблюдаемость и то, какой более дорогой failure он предотвращает.
+
 ### OOM killer — это не просто ошибка одного запроса
 
 На Linux действует memory overcommit. Kernel может разрешить allocations, которые в совокупности выглядят возможными виртуально, а затем при реальном истощении memory/swap выбрать процесс-жертву.
@@ -1901,6 +2062,8 @@ Linux позволяет менять oom_score_adj. PostgreSQL documentation о
 Это полезный последний рубеж.
 
 Но он не создаёт memory capacity.
+
+`oom_score_adj` и сам OOM killer полезно считать не capacity mechanism, а **предохранителем последней линии**. Предохранитель нужен именно потому, что система может выйти из normal envelope. Хороший предохранитель ограничивает blast radius; плохая инженерия начинается тогда, когда существование предохранителя принимают за доказательство, что нормальный режим спроектирован правильно.
 
 Если workload системно требует больше физической памяти, чем есть у машины, мы лишь выбираем, как именно будет выглядеть авария.
 
@@ -2762,41 +2925,21 @@ service capacity - sustainable arrival rate
 
 ### Admission control — это тоже scaling
 
-Интуитивно scaling выглядит так:
+В главе 6 мы уже разобрали механизм: pool не уничтожает очередь, а переносит admission перед дорогой частью PostgreSQL. Здесь важен только scaling-вывод.
+
+Рост внешнего demand не обязан означать рост expensive concurrency внутри instance:
 
 ```text
 больше requests
 ->
-больше одновременно выполняем
-```
-
-Но конечная система часто масштабируется лучше через противоположное действие:
-
-```text
-больше requests
+controlled queue перед bottleneck
 ->
-не увеличиваем expensive concurrency
-->
-лишняя работа ждёт перед bottleneck
+bounded PostgreSQL concurrency
 ```
 
-Именно это делает правильно настроенный pool. В транспортной метафоре это ramp metering — светофор на въезде. Он не строит новые полосы и не увеличивает физическую capacity bottleneck. Он не позволяет внешнему demand мгновенно превратиться в слишком много машин на ограниченном участке.
+В транспортной метафоре это тот же ramp metering. Новых полос он не строит. Зато система способна принять больший offered load, не превращая его автоматически в большее число competing backends.
 
-А разделение pool по workload classes плюс OS resource policy может дать ещё один уровень:
-
-```text
-OLTP demand --------> OLTP queue --------> bounded OLTP backends
-Reporting demand ---> report queue ------> bounded report backends
-ETL demand ---------> ETL queue ---------> bounded ETL backends
-```
-
-Система теперь способна принять больше внешнего demand, не превращая его автоматически в большее число competing PostgreSQL processes.
-
-Это не «мы сделали базу быстрее».
-
-Мы сделали систему **устойчивее к росту offered load**.
-
-Для production это вполне настоящий вид scaling.
+Это не «мы сделали один query быстрее». Это **устойчивость к росту offered load**, и для production это настоящий вид scaling. Общую queueing model соберём в главе 18.
 
 ### Cgroup: не per-query магия, а enforcement для класса
 
@@ -2931,6 +3074,40 @@ Partitioning может дать и другие operational свойства:
 - старую partition можно detach/archive/drop отдельно;
 - backup/restore/lifecycle policy можно строить вокруг частей данных;
 - hot working set легче отделить от cold history.
+
+### Partitioning может уменьшить не latency, а количество созданной maintenance work
+
+Для lifecycle data это особенно важно.
+
+Если business boundary совпадает с partition boundary — например, целый старый месяц больше не нужен, — у нас появляются два принципиально разных физических действия.
+
+Первое:
+
+```text
+удалить сотни тысяч rows по одной логической операции DELETE
+→ создать dead tuples
+→ записать WAL
+→ потом дать VACUUM право и время погасить debt
+```
+
+Второе:
+
+```text
+удалить целую old partition как physical unit
+→ не создавать row-by-row MVCC history для каждой удаляемой строки
+```
+
+В нашем стенде удаление месяца обычным DELETE создало около 13 MB WAL и примерно 245 тысяч dead rows. Операция над целой старой partition для того же lifecycle intent оставила порядка 7 KB WAL и не создала такого heap debt.
+
+Эти числа относятся к конкретной схеме и конкретному experiment. Они не означают, что `DROP/DETACH` всегда «в тысячи раз быстрее». Они показывают другой принцип:
+
+**правильная physical boundary иногда позволяет вообще не создавать работу, которую потом пришлось бы ускорять.**
+
+Но этот выигрыш существует только если semantics действительно разрешает удалить/отделить весь unit. Partitioning не заменяет DELETE для произвольного subset rows. Цена boundary — заранее выбрать partition key, управлять lifecycle partitions и не превратить каталог в тысячи плохо управляемых кусочков.
+
+Поэтому maintenance-вопрос к partitioning должен звучать не только «поможет ли pruning?», но и:
+
+**совпадает ли lifecycle данных с unit, который мы сможем создать, обслужить, архивировать и удалить целиком?**
 
 Но partitioning внутри одного PostgreSQL instance не создаёт новые CPU sockets, новый WAL authority или независимый memory bandwidth.
 
@@ -3660,6 +3837,93 @@ Vectorized scan сам по себе не делает executor vectorized: ес
 
 И ещё одно: planner performance во многом строится на сохранении знания — statistics, ordering, parameterization — и на раннем уничтожении вариантов, которые это знание делает ненужными. Ошибка в знании может стоить дороже одной неверной цифры cost.
 
+
+## Интермеццо. Upgrade открыл cluster. Когда закончилась работа?
+
+Major upgrade очень легко измерить одной удобной точкой:
+
+```text
+server started
+application connected
+```
+
+Но эта точка говорит в основном о том, что новая версия способна открыть состояние и начать обслуживать работу.
+
+Она не доказывает, что система уже вернулась в прежний operating envelope.
+
+### Upgrade меняет не только bytes
+
+В planner chapter мы уже увидели одну часть проблемы: после major version могут измениться statistics state, transformations, cost behavior и набор Path alternatives.
+
+Но production после upgrade имеет и другое незавершённое состояние:
+
+- statistics надо проверить или досчитать;
+- indexes иногда надо перестроить по причинам конкретного upgrade/migration path;
+- caches и working set надо снова сформировать;
+- extensions получают новую binary/version boundary;
+- background maintenance начинает жить уже в новом release;
+- критичные plans надо проверить не только на correctness, но и на SLA.
+
+То есть upgrade лучше рассматривать как переход:
+
+```text
+old operating state
+        ↓
+version boundary
+        ↓
+correct but not necessarily settled state
+        ↓
+statistics / rebuild / warm-up / verification
+        ↓
+new normal operating region
+```
+
+### Наш прогон: statistics были не самым длинным хвостом
+
+На одном из стендов восстановление всей нужной optimizer statistics заняло около 0.5 s.
+
+Перестроение текстовых indexes через `REINDEX` заняло около 9.3 s — почти в двадцать раз дольше.
+
+Смысл этих чисел не в коэффициенте 20. На другой базе всё будет иначе.
+
+Они показывают, почему нельзя определять upgrade window одной операцией `ANALYZE` или одной точкой «cluster уже принимает connections».
+
+Разные pieces post-upgrade debt имеют разные service rates.
+
+### analyze-in-stages меняет порядок оплаты, а не отменяет полную цену
+
+`vacuumdb --analyze-in-stages` полезен после состояния без пригодной statistics именно потому, что сначала быстро строит грубое optimizer knowledge с маленьким statistics target, а затем проходит следующие stages и собирает полную statistics.
+
+Это очень хороший operational design:
+
+```text
+сначала вернуть planner минимально полезное знание
+потом улучшать качество знания
+```
+
+Но staging не означает, что полный ANALYZE work исчез.
+
+Это sequencing и prioritization: мы раньше получаем usable planner state, а остальную работу платим позже.
+
+Тот же мотив книга уже встречала у checkpoint smoothing и online DDL.
+
+### Upgrade SLA должен иметь несколько точек
+
+Полезнее писать не одно `upgrade_time`, а хотя бы:
+
+```text
+T_open       — cluster технически открыт
+T_plan       — critical plans/stats проверены
+T_rebuild    — обязательные rebuild/maintenance закончены
+T_sla        — representative workload вернулся в contract
+```
+
+Не каждой системе нужны все четыре отдельными числами.
+
+Но если после `T_open` ещё идёт работа, способная изменить p99, WAL, I/O или plans, upgrade operationally ещё не закончился.
+
+> **Запомнить.** major upgrade — не только преобразование состояния на диске. Это переход работающей системы в новый operating region; sequencing может уменьшить время до полезного состояния, но не уничтожает обязательную post-upgrade work.
+
 ## Глава 9. Один набор данных, два SLA: почему OLTP + OLAP ещё не HTAP
 
 Есть таблица операций. Из неё надо получить баланс клиента.
@@ -3835,6 +4099,10 @@ AM определяет storage-level behavior:
 
 Поэтому Table AM может быть прекрасным способом добавить columnar storage — и одновременно оказаться слишком низкой границей для целого query engine.
 
+Современный `pg_duckdb` хорошо материализует именно эту границу. Для DuckDB-backed tables extension использует `duckdb` table access method (`CREATE TABLE ... USING duckdb`), но интеграция не заканчивается storage API: extension также умеет отдавать аналитическое execution движку DuckDB. Поэтому фраза «подключили DuckDB через AM» удобна как короткая, но архитектурно неполна. Надо спрашивать отдельно: где хранится data, кто строит и исполняет operators, где проходит transaction boundary и какие части PostgreSQL executor всё ещё остаются на пути.
+
+Это хороший пример полезного «костыля» в нейтральном смысле: existing PostgreSQL surface сохраняется, а более подходящий engine постепенно получает часть physical work. Такой мост может быть отличной конечной architecture или transitional boundary. Но он не отменяет границы между двумя execution models.
+
 ### Глубже: что находится выше Table AM
 
 У PostgreSQL есть несколько extension boundaries, и каждая режет систему в другом месте.
@@ -3850,6 +4118,10 @@ FDW
 Foreign Data Wrapper даёт PostgreSQL access к данным во внешней системе. Хороший FDW может push down filters, joins, aggregates и возвращать planner’у свои ForeignPaths.
 
 Здесь engine получает больше свободы, но мы уже пересекли network/external-system boundary.
+
+В 2025–2026 появился очень наглядный текущий пример — `pg_clickhouse`. PostgreSQL остаётся знакомым SQL/application endpoint, а `clickhouse_fdw` старается push down analytical work в ClickHouse. Для migration это может быть прекрасный bridge: application меняется меньше, heavy execution уходит туда, где оно дешевле. Но мост не делает системы одной СУБД. Network, type/semantic mapping, pushdown coverage, authentication, failure и freshness всё равно остаются частью contract. Если часть expression не push down и начинает выполняться по строкам на стороне PostgreSQL, цена bridge может резко измениться.
+
+То есть FDW — не «грязный обходной путь» сам по себе. Это сознательная граница, которая особенно полезна, когда стоимость переписать application выше стоимости поддерживать bridge. Опасность начинается, когда никто больше не знает, что bridge был компромиссом, и его ограничения перестают измерять.
 
 Отдельный engine + CDC/ETL
 
@@ -4002,7 +4274,7 @@ HTAP поэтому не статическая способность binary su
 
 > **Запомнить.** OLTP и OLAP могут работать с одним data domain и при этом иметь разные contracts результата. Table AM умеет менять storage; это ещё не означает, что через него прошла граница целого analytical engine.
 
-> **Сверить в своей версии.** capabilities Table AM, CustomScan/FDW hooks и конкретного analytical extension/engine. Здесь особенно опасно переносить свойства одного продукта на PostgreSQL API вообще.
+> **Сверить в своей версии.** capabilities Table AM, CustomScan/FDW hooks и конкретного analytical extension/engine. Примеры `pg_duckdb` и `pg_clickhouse` здесь versioned: перед печатью надо сверить их актуальную архитектуру и ограничения. Особенно опасно переносить свойства одного продукта на PostgreSQL API вообще.
 
 ## Глава 10. Мне нужен поиск. Почему бы не поставить отдельный search engine?
 
@@ -4451,6 +4723,137 @@ PostgreSQL позволяет добавлять огромный класс ф�
 
 Прежде чем строить ещё одну систему рядом с PostgreSQL, проверьте, не пытаетесь ли вы вынести наружу то, что по природе является семантикой данных.
 
+## Интермеццо. Костыль — не ругательство. Это временная архитектура с долгом
+
+В production почти никогда не бывает момента, когда можно остановить мир, построить идеальную архитектуру и потом снова включить traffic.
+
+Нам приходится жить между состояниями.
+
+Не хватает памяти — query spill'ится во временный файл.
+
+Слишком много клиентов — ставим pool и очередь перед PostgreSQL.
+
+Нельзя переписать analytics application за месяц — оставляем PostgreSQL SQL surface и отправляем часть work через FDW в другой engine.
+
+Новая storage/execution architecture ещё не стала частью core — используем extension hooks или Table AM как мост.
+
+Надо пережить memory catastrophe — kernel имеет OOM killer, а operator может управлять victim policy.
+
+На инженерном жаргоне всё это легко назвать костылями. Но слово почти ничего не объясняет.
+
+Полезнее разделить четыре разных роли.
+
+**Pressure valve.**
+
+Spill/temp files, bounded queue, throttling. Мы сознательно разрешаем работе стать медленнее или занять другой ресурс, чтобы не пересечь более опасную boundary.
+
+**Fuse.**
+
+`lock_timeout`, statement timeout, cgroup limit, OOM victim policy. Предохранитель не делает нормальный режим быстрее. Он ограничивает blast radius, когда нормальный regime уже нарушен.
+
+**Bridge.**
+
+FDW, compatibility layer, dual endpoint, часть extension architecture. Bridge позволяет двум системам некоторое время жить вместе и уменьшает цену migration.
+
+**Scaffolding.**
+
+Extra replica на migration window, временная таблица, дополнительный disk, shadow copy, `NOT VALID` constraint с последующей validation. Мы покупаем временный ресурс или состояние, чтобы безопасно перейти из A в B.
+
+Все четыре формы нормальны. Ненормально другое: когда временная конструкция перестаёт иметь имя, owner и exit condition.
+
+### Пять вопросов к любому костылю
+
+Первый: **какой invariant он защищает прямо сейчас?**
+
+Если ответ только «с ним быстрее», этого мало. Spill может защищать memory headroom. Pool — bounded expensive concurrency. `lock_timeout` — availability во время migration. FDW bridge — возможность вынести analytics без одномоментного rewrite application.
+
+Второй: **куда он переносит цену?**
+
+```text
+spill          -> temp I/O
+pool           -> queue wait
+FDW            -> network + pushdown boundary
+external engine-> freshness/reconciliation
+oom_score_adj  -> выбирает victim, но не создаёт RAM
+```
+
+Если новая цена не измеряется, мы просто перестали видеть долг.
+
+Третий: **каков blast radius при отказе самого костыля?**
+
+Extension внутри backend имеет один failure domain. Remote engine — другой. Temporary disk, который заполнил filesystem с `pg_wal`, может превратить здоровый pressure valve в database outage. Queue без bound может стать новым накопителем долга.
+
+Четвёртый: **как мы узнаем, что костыль перестал быть допустим?**
+
+Нужен observable threshold: temp footprint, queue wait, FDW fallback/local execution, lag, retry rate, OOM/reclaim events, maintenance window. Без этого временная architecture стареет незаметно.
+
+Пятый: **какой exit path?**
+
+Не обязательно «обязательно удалить через три месяца». Некоторые мосты оказываются хорошей permanent architecture. Но решение должно быть повторно принято сознательно. Если bridge остаётся навсегда, ему нужны обычные SLO, ownership, upgrade/recovery tests и capacity planning. Тогда это уже не временный костыль, а признанная часть системы.
+
+### DuckDB через AM и ClickHouse через FDW — два разных мостика
+
+Эти два современных примера полезны именно потому, что внешне решают похожую задачу: оставить PostgreSQL удобной точкой входа и дать analytics другой execution architecture.
+
+`pg_duckdb` показывает, что storage boundary и execution boundary могут накладываться, но не совпадать. Для DuckDB-backed relations есть `duckdb` Table AM, однако аналитический engine требует больше, чем callbacks хранения. Если такой bridge даёт нужный SLA — прекрасно. Но надо знать, какая часть pipeline уже DuckDB, а какая всё ещё PostgreSQL.
+
+`pg_clickhouse` показывает другую сделку. FDW оставляет ClickHouse отдельной системой и старается отправить туда как можно больше query work. Здесь яснее failure/network boundary, зато качество результата сильно зависит от pushdown: хороший plan может превратиться в один remote analytical query, плохая граница — в перенос большого потока rows обратно в PostgreSQL.
+
+Ни один вариант не надо оценивать словом «костыль» или «нативно».
+
+Надо измерить:
+
+- какую работу мы перестали делать в PostgreSQL;
+- какую очередь разгрузили;
+- какую новую очередь или consistency boundary создали;
+- как выглядит degraded mode;
+- можно ли восстановить/rebuild bridge;
+- кто authoritative;
+- что произойдёт при upgrade одной стороны раньше другой.
+
+### Временный ресурс должен иметь бюджет
+
+Слово temporary особенно опасно. Оно психологически превращает ресурс в бесплатный.
+
+Но temporary file занимает настоящий disk и I/O bandwidth. Extra replica потребляет storage, WAL transport и operational attention. Временный pool держит очередь реальных пользователей. Shadow copy надо потом удалить или сделать authoritative.
+
+Поэтому у временного ресурса должны быть как минимум:
+
+```text
+limit
+owner
+telemetry
+cleanup / exit condition
+```
+
+Если этого нет, «временно добавили 2 TB» однажды превращается в обязательные 2 TB, происхождение которых никто не помнит.
+
+### Хороший костыль виден
+
+Плохой костыль скрывает architecture.
+
+Хороший делает компромисс явным:
+
+```text
+мы сохраняем X
+ценой Y
+до/пока выполняется Z
+```
+
+Например:
+
+> Мы разрешаем hash aggregate spill до bounded temp budget, чтобы сохранить memory headroom при reporting concurrency.
+
+Или:
+
+> Мы оставляем analytics SQL в PostgreSQL и используем ClickHouse через FDW, пока application migration дороже network/pushdown boundary; fallback и amount of pushed-down work измеряем.
+
+Или:
+
+> Мы защищаем postmaster от OOM как last defense, но нормальным invariant остаётся отсутствие систематического memory overcommit при разрешённой concurrency.
+
+Это и есть зрелое отношение к костылям. Не стыдиться их и не влюбляться в них. Понимать, **какую работу и риск они переносят**, и не позволять временному решению стать невидимой архитектурой.
+
 ## Глава 12. ORM сохранил данные. А смысл?
 
 Представим договор, который действует с 10:00 до 12:00.
@@ -4819,6 +5222,216 @@ Application может делать тот же friendly pre-check.
 Хорошая система не только быстро делает работу. Она сохраняет знание, которое позволяет эту работу не делать заново и не терять смысл на границах.
 
 > **Запомнить.** ORM способен идеально сохранить values и при этом потерять часть data/query semantics. Это не аргумент «против ORM»; это причина явно выбирать, где живёт знание, которое должно пережить concurrency и всех writers.
+
+## Интермеццо. Проклятие удобной абстракции: цена становится видна только после порога
+
+Некоторые механизмы PostgreSQL особенно легко назвать «проклятием».
+
+TOAST. ORM. Cache. Prepared plans. Pooling.
+
+Пока всё хорошо, они убирают сложность из поля зрения. Именно для этого они и существуют. Проблема начинается, когда прозрачность принимают за отсутствие физики или семантики.
+
+У такого «проклятия» обычно одна форма:
+
+```text
+удобная abstraction
+        ↓
+скрытая цена или потерянная semantics
+        ↓
+threshold / scale / concurrency / history
+        ↓
+в production внезапно виден другой режим
+```
+
+Ничего мистического не произошло. Мы просто пересекли границу, которую development workload не показывал.
+
+### TOAST: строка логически та же, физически уже другая
+
+PostgreSQL обычно работает с pages по 8 КБ и не хранит обычный heap tuple поперёк нескольких pages. Поэтому большие varlena values — `text`, `bytea`, `jsonb` и другие TOAST-able types — могут быть compressed и/или вынесены out-of-line в отдельную TOAST relation.
+
+Важно не превращать приблизительное число в магическую константу. TOAST management начинает работать, когда сохраняемая row становится шире примерно 2 КБ; дальше результат зависит от остальных columns, storage strategy и compressibility. Out-of-line value хранится chunks примерно по 2 КБ.
+
+Для пользователя всё выглядит прекрасно:
+
+```sql
+SELECT payload->>'customer_id'
+FROM events
+WHERE id = $1;
+```
+
+Логически это всё ещё одна колонка `payload`. Физически маленький JSON и большой TOASTed JSON уже могут быть двумя разными workloads.
+
+Особенно коварен UPDATE. PostgreSQL умеет сохранить старое out-of-line значение, если соответствующая column **не изменилась**. Поэтому обновление соседней маленькой колонки не обязано переписывать большой TOAST value.
+
+Но выражение вроде:
+
+```sql
+UPDATE documents
+SET payload = jsonb_set(payload, '{status}', '"done"')
+WHERE id = $1;
+```
+
+создаёт новое значение `jsonb`. На logical level изменился один маленький key. На storage boundary изменилась вся JSONB-column как datum. Значит, нельзя делать вывод «мы записали несколько байт». В игру снова входят построение нового value, compression/TOAST storage, WAL и, если JSONB участвует в indexes, отдельная index-maintenance price.
+
+Это и есть важная формулировка:
+
+> **Маленькое semantic изменение не гарантирует маленькую physical запись.**
+
+### Почему JSON «вдруг» начинает тормозить именно в production
+
+На development всё могло выглядеть идеально:
+
+- JSON documents по 500–1000 bytes;
+- несколько rows;
+- почти всё в cache;
+- одна session;
+- synthetic strings хорошо compress;
+- обновления редкие;
+- replica, WAL archive и GIN indexes отсутствуют.
+
+В production изменилось сразу несколько осей:
+
+- реальные documents выросли и пересекли TOAST boundary;
+- значения стали менее compressible;
+- update rate вырос;
+- одинаковый logical field меняют сотни sessions;
+- WAL надо ещё архивировать и replay на standby;
+- indexes надо поддерживать;
+- TOAST relation получила собственный working set и vacuum history.
+
+Поэтому фраза «JSONB медленный» почти так же бесполезна, как «PostgreSQL не масштабируется». Сначала надо спросить:
+
+**какая physical transition произошла?**
+
+### Эксперимент: один key, разные размеры одного JSONB
+
+Здесь нужен очень простой differential experiment.
+
+Берём одинаковый schema и создаём payload нескольких классов:
+
+```text
+0.5 KB
+1.5 KB
+4 KB
+32 KB
+128 KB
+```
+
+Для каждого размера делаем два набора данных:
+
+```text
+highly compressible
+poorly compressible
+```
+
+Потом одинаковое число раз меняем один маленький key через `jsonb_set`.
+
+Смотрим не только latency:
+
+- `pg_column_size()` logical/stored behavior в контексте выбранного запроса;
+- heap и TOAST relation size;
+- WAL bytes на update batch;
+- buffer/I/O activity;
+- index growth, если JSONB indexed;
+- vacuum/dead-tuple aftermath;
+- replica replay/catch-up, если хотим operational слой.
+
+Контрольный вариант — тот же `status` хранится отдельной обычной колонкой, а большой JSONB остаётся неизменным.
+
+Цель эксперимента не доказать «JSONB плох». Она точнее:
+
+> найти размер и workload, после которых маленькое business change начинает иметь цену большого physical value.
+
+### ORM — то же проклятие, только теряется не физика, а смысл
+
+С TOAST abstraction скрывает representation.
+
+ORM может скрыть **semantic boundary**.
+
+На development один process пишет через один code path. Поэтому application validation кажется invariant. Object traversal по десяти rows кажется запросом. Generic `string/int/timestamp` mappings кажутся достаточной data model.
+
+Production добавляет второго writer, concurrency и большой graph. И внезапно выясняется:
+
+```text
+application check != concurrent constraint
+object traversal != set query
+generic type != database semantics
+portable SQL != atomic PostgreSQL operation
+```
+
+Это уже подробно разобрано в предыдущей главе. Здесь важен общий паттерн: abstraction была полезна, пока скрытая semantics не понадобилась другому writer, planner’у, index или concurrent transaction.
+
+Поэтому ORM не надо «снимать», как не надо отключать TOAST. Надо знать, **что abstraction перестала представлять**.
+
+### Development упрощает мир. Test выбирает мир. Production получает весь мир сразу
+
+Эти три этапа отличаются целью.
+
+**Development** оптимизирует feedback loop. Мы сознательно убираем размеры, delays, failures и конкуренцию, которые мешают быстро менять code.
+
+**Test** оптимизирует доказательство. Мы выбираем state и заставляем одну hypothesis стать проверяемой и воспроизводимой. Чем лучше test, тем яснее его boundary.
+
+**Production** ничего не обязана изолировать. Она складывает вместе data history, skew, concurrency, maintenance, network, users, retries, caches, failures и изменения workload во времени.
+
+Поэтому production incident очень часто оказывается не «совсем новым bug», а **composition bug**:
+
+```text
+A безопасно отдельно
+B безопасно отдельно
+C безопасно отдельно
+
+A × B × C × время
+        ↓
+новый operating regime
+```
+
+Именно так один безопасный query превращается в OOM при сорока copies. Быстрая DDL превращается в lock convoy. Нормальный JSONB update превращается в WAL/TOAST amplification. Хороший ORM path теряет concurrency invariant.
+
+### Что значит «протестировано для production»
+
+Не существует одного финального теста, который превращает стенд в production. Есть набор доказательств разных типов.
+
+Минимум нужно разделять:
+
+1. **Correctness** — результат и invariants верны?
+2. **Concurrency** — они остаются верны при допустимых interleavings?
+3. **Scale/representation** — данные пересекают те же physical thresholds и distributions?
+4. **Operational load** — arrival, tails и background work похожи на реальный operating day?
+5. **Failure/recovery** — система после faults возвращается в normal envelope?
+6. **History** — несколько часов/дней работы не создают debt, которого нет в коротком тесте?
+
+И даже после этого production остаётся источником новых evidence. Цель тестирования не угадать все будущие состояния. Цель — сделать наши assumptions явными настолько, чтобы новый production regime можно было быстро объяснить и воспроизвести.
+
+### Практический вопрос после каждого «на тесте было нормально»
+
+Не:
+
+```text
+почему production странная?
+```
+
+А:
+
+```text
+какая ось изменилась?
+
+size?
+distribution?
+compressibility?
+concurrency?
+arrival rate?
+history?
+cache state?
+background work?
+failure/retry?
+semantic boundary?
+```
+
+Если такую ось нашли, incident уже перестаёт быть проклятием. Он снова становится механизмом.
+
+> **Запомнить.** Удобная abstraction опасна не тогда, когда она что-то скрывает — скрывать сложность её работа. Она становится опасной, когда мы забываем, **что именно было скрыто и при каком threshold это снова становится частью physical или semantic contract**.
+
+> **Сверить в своей версии.** TOAST threshold/target, compression defaults и JSONB/storage behavior могут иметь version-specific детали. Перед печатью сверяем PostgreSQL 19 GA и не превращаем приблизительный storage threshold в гарантированную границу для конкретного schema.
 
 ## Глава 13. Мы включили больше логов — и этим положили сервис
 
@@ -5271,6 +5884,10 @@ T_sla — workload вернулся в обещанный performance envelope.
 
 Если SLA важен, именно T_sla — operational recovery time.
 
+На нашем recovery-стенде разница между milestone была видна даже на очень коротком запуске: первый ответ сервера появился примерно через 0.62 s, а replay закончился примерно через 3.82 s. Это не два измерения одной и той же готовности. Первый ответ доказывает только раннюю стадию доступности; конец replay — другую стадию recovery. Ни одна из них сама по себе ещё не доказывает `T_sla`.
+
+Поэтому фраза «база уже отвечает» должна немедленно вызывать второй вопрос: **какой именно recovery invariant уже выполнен, а какой ещё нет?**
+
 PostgreSQL “up” — это состояние процесса. Сервис “recovered” — состояние workload.
 
 ## Глава 15. Replica отстаёт на 400 GB. Это много или мало?
@@ -5437,6 +6054,26 @@ LSN говорит о позиции в WAL stream.
 
 Это хороший пример того, почему HTAP/replica design нельзя оценивать только на standby.
 
+#### Где увидеть horizon, который feedback вернул на primary
+
+Здесь есть observability trap.
+
+Интуитивно хочется посмотреть `pg_stat_replication.backend_xmin`: это действительно horizon, сообщённый standby через hot standby feedback. Но в современной PostgreSQL есть важное исключение: если standby подключён через replication slot, `backend_xmin` может быть `NULL`, а удерживаемый `xmin` живёт в `pg_replication_slots`.
+
+Именно это мы увидели на стенде: `pg_stat_replication.backend_xmin` был пуст, хотя feedback реально удерживал прошлое; relevant horizon был виден в `pg_replication_slots.xmin`.
+
+Поэтому диагностика должна смотреть обе boundary, а не объявлять `NULL` доказательством отсутствия retention:
+
+```sql
+SELECT application_name, state, backend_xmin
+FROM pg_stat_replication;
+
+SELECT slot_name, slot_type, xmin, catalog_xmin, restart_lsn
+FROM pg_replication_slots;
+```
+
+Это хороший пример общего правила observability: одно и то же logical obligation может менять место представления, когда architecture получает новую boundary — здесь physical replication slot.
+
 ### Replication slot: гарантия, которая умеет съесть диск
 
 Slot нужен, чтобы primary не удалил WAL, который consumer ещё не получил.
@@ -5589,6 +6226,25 @@ requested past state
 Если base backup есть, а нужной части WAL нет, PITR не существует.
 
 Если WAL archive есть, но никто никогда не проверял restore chain, это обещание, а не факт.
+
+### `archive_command` должен доказывать целый segment, а не просто запуск копирования
+
+На стенде у нас воспроизвёлся неприятно простой failure mode.
+
+`archive_command`, сведённый к обычному `cp`, начал копировать WAL segment и был прерван. В archive destination остался обрезанный файл. Локально это выглядит как маленькая shell-проблема. Для PITR это уже разрыв recovery history.
+
+Здесь важна не команда `cp` сама по себе. Важен contract archiver’а:
+
+**zero/success должен означать, что complete WAL segment действительно находится в archive в пригодном для последующего restore состоянии.**
+
+Кроме того, retry и pre-existing target надо проектировать вместе. PostgreSQL может повторно попросить архивировать тот же WAL file. Если destination уже существует, archive logic должна различить:
+
+- там лежит полный идентичный durable segment — это уже success;
+- там лежит другой или partial content — это failure, который нельзя молча принять и нельзя бездумно затереть.
+
+Поэтому production archive boundary обычно требует более сильного протокола, чем «скопировать прямо в final filename»: temporary destination, проверяемое завершение/persistence и только затем publish/rename либо специализированный archive tool с эквивалентной семантикой. Конкретный механизм зависит от filesystem/object storage, но invariant один.
+
+И это ещё один случай нашей линии про костыли: простой `cp` прекрасен как первый working bridge. Он становится опасен, когда его временная semantics незаметно превращается в permanent recovery contract.
 
 ### Самая полезная recovery exercise — не «восстановить последний backup»
 

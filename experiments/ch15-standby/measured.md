@@ -1,40 +1,66 @@
-# Измеренное: глава 7
-
-PostgreSQL 16.15, primary и реплика на одной машине (порты 55432/55433),
-`pgbench` scale 20, физический слот. Длинный запрос на реплике,
-`UPDATE` двух третей таблицы и `VACUUM` на primary.
-
-| прогон | запрос на реплике | `confl_snapshot` | `VACUUM` на primary |
-|---|---|---|---|
-| 1 — `max_standby_streaming_delay = 0` | убит | 1 | **666 666 удалено** |
-| 3 — `hot_standby_feedback = on` | дожил до `COMMIT` | 0 | **0 удалено, 666 666 не подлежат удалению** |
-
-Это вся глава в двух строках. Один и тот же конфликт: в первом случае
-проигрывает запрос на реплике, в третьем — место на primary.
-
-## Где виден держатель горизонта
-
-Пока запрос на реплике жив, при `hot_standby_feedback = on`:
-
-```
- slot_name | active | xmin | catalog_xmin | xmin_age
- standby1  | t      |  757 |              |        0
+```text
+Experiment:   standby-conflicts
+Chapter:      глава 15 (replica)
+PostgreSQL:   16.15 (Ubuntu), commit not recorded
+Machine/OS:   см. ../ENVIRONMENT.md
+Date:         2026-09-06
+Question:     кто проигрывает при конфликте восстановления и где виден
+              держатель горизонта при hot_standby_feedback
+Result:       при delay=0 гибнет запрос на replica; при feedback=on
+              VACUUM на primary не может освободить строки; держатель
+              виден в слоте, а не в pg_stat_replication
+Scripts:      make-cluster.sh, conflict.sh
+Raw output:   results/run1, results/run3 (не версионируются)
 ```
 
-**`pg_stat_replication.backend_xmin` при этом был пуст.** Удержание
-видно в `pg_replication_slots.xmin`, а не там, где его ищут по
-умолчанию. При настройке через слот смотреть надо оба места.
+Стенд: primary и physical standby на одной машине, физический слот,
+`pgbench` scale 20. На standby идёт транзакция `REPEATABLE READ` с
+`pg_sleep(20)`; на primary в это время `UPDATE` двух третей таблицы и
+`VACUUM`.
 
-Текст главы поправлен: раздел 7.4 отправлял читателя только в
-`pg_stat_replication`.
+## Observed
 
-## Что пришлось починить
+| прогон | настройка standby | запрос на standby | `confl_snapshot` | `VACUUM` на primary |
+|---|---|---|---|---|
+| 1 | `max_standby_streaming_delay = 0`, feedback off | отменён с `canceling statement due to conflict with recovery` | 1 | `666666 removed, 0 not yet removable` |
+| 3 | `max_standby_streaming_delay = 0`, feedback **on** | дожил до `COMMIT` | 0 | `0 removed, 666666 not yet removable` |
 
-**Счётчики конфликтов не сбрасывались между прогонами.** Третий прогон
-показывал `confl_snapshot = 1`, унаследованную от первого, — то есть
-ровно противоположное тому, что доказывает. Добавлен `pg_stat_reset()`
-на реплике перед прогоном.
+Прогон 2 (`delay = 30s`, feedback off) не выполнялся.
 
-**Снимок горизонта делался после смерти запроса.** Держатель к тому
-моменту исчезал, и отчёт показывал пустоту. Теперь снимок берётся,
-пока запрос на реплике ещё жив.
+### Где виден держатель горизонта
+
+Снимок сделан на primary, пока запрос на standby ещё выполнялся,
+прогон 3:
+
+```text
+pg_stat_replication.backend_xmin  = NULL
+pg_replication_slots.xmin         = 757     (slot standby1, active = t)
+```
+
+`removable cutoff` в выводе `VACUUM` того же прогона — 757.
+
+## Derived
+
+Совпадение `pg_replication_slots.xmin` и `removable cutoff` показывает,
+что удержание горизонта на primary соответствует именно слоту.
+Отношение освобождённых строк: 666 666 против 0.
+
+## Interpretation
+
+Конфликт один, а расплата разная: либо запрос на standby, либо место
+на primary. Практическое следствие для текста: при подключении через
+слот держателя надо искать в `pg_replication_slots.xmin`, а не только
+в `pg_stat_replication.backend_xmin`, который в этом прогоне был пуст.
+
+Почему `backend_xmin` оказался пустым при работающем feedback, из
+наблюдений не следует. Это записано в `docs/provenance-gaps.md`.
+
+## Замечание о валидности
+
+Счётчики конфликтов не сбрасывались между прогонами: третий прогон
+показывал `confl_snapshot = 1`, унаследованную от первого, то есть
+обратное тому, что доказывает. Добавлен `pg_stat_reset()` на standby.
+
+Снимок состояния делался после завершения запроса на standby, когда
+держателя уже нет, и показывал пустоту. Теперь снимок берётся во время
+работы запроса.

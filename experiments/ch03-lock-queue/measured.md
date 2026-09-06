@@ -1,37 +1,54 @@
-# Измеренное: глава 3
+```text
+Experiment:   lock-queue
+Chapter:      глава 3
+PostgreSQL:   16.15 (Ubuntu), commit not recorded
+Machine/OS:   см. ../ENVIRONMENT.md
+Date:         2026-09-06
+Question:     кого именно ждёт обычный SELECT, пришедший после
+              ожидающей DDL, и что даёт lock_timeout
+Result:       читатель ждёт миграцию, а не другого читателя; ожидание
+              2.05 s против 0.025 s с ограничителем
+Scripts:      scenario.sh, blocked.sql, locks.sql, setup.sql
+Raw output:   results/naive, results/timeout, results/cancel-ddl
+```
 
-PostgreSQL 16.15, контейнер. Таблица 100 000 строк, три сессии.
+Три сессии: A — открытая транзакция с `SELECT` (держит `ACCESS SHARE`,
+пауза на клиенте, состояние `idle in transaction`); B — `ALTER TABLE
+... ADD COLUMN ... DEFAULT '' NOT NULL`; C — обычный `SELECT count(*)`.
 
-| прогон | ожидание `SELECT` (сессия C) | что стало с DDL |
+## Observed
+
+| прогон | ожидание сессии C | что стало с DDL |
 |---|---|---|
-| `naive` | **2.05 с** | выполнилась, когда держатель ушёл |
-| `timeout` | **0.025 с** | упала: `canceling statement due to lock timeout` |
-| `cancel-ddl` | 2.05 с (до отмены) | снята вручную, очередь разошлась мгновенно |
-
-Разница между первой и второй строкой — 80 раз, и это цена одной
-строки `SET lock_timeout` в регламенте миграций.
-
-## Главное подтверждение
+| `naive` | 2.05 s | выполнилась после ухода держателя |
+| `timeout` (`lock_timeout = 2s`) | 0.025 s | `canceling statement due to lock timeout` |
+| `cancel-ddl` | 2.05 s до отмены | снята вручную, очередь разошлась |
 
 Дерево ожиданий в прогоне `cancel-ddl`:
 
+```text
+1746 | idle in transaction | Client | ClientRead | {}     | SELECT count(*) FROM orders;
+1751 | active              | Lock   | relation   | {1746} | ALTER TABLE orders ADD COLUMN ...
+1756 | active              | Lock   | relation   | {1751} | SELECT count(*) FROM orders
 ```
- 1746 | idle in transaction | Client | ClientRead | {}     | SELECT count(*) FROM orders;
- 1751 | active              | Lock   | relation   | {1746} | ALTER TABLE orders ADD COLUMN ...
- 1756 | active              | Lock   | relation   | {1751} | SELECT count(*) FROM orders
-```
 
-У читателя (1756) в `blocked_by` стоит **pid миграции** (1751), а не pid
-другого читателя (1746). Два `ACCESS SHARE` совместимы; C стоит из-за
-того, кто встал между ними в очередь. Это утверждение раздела 3.4,
-проверенное на живом сервере.
+Состояние сессии A перед миграцией зафиксировано отдельно:
+`idle in transaction`, 1.99 s в этом состоянии.
 
-Сессия A действительно находится в состоянии `idle in transaction`, как
-в сцене главы: пауза держится на клиенте.
+## Derived
 
-## Что пришлось починить
+Отношение ожиданий: 2.05 / 0.025 ≈ **82×**.
+Ожидание C в прогоне `naive` совпадает с длительностью ожидания B
+(обе сессии ждали до конца прогона), а не с длительностью самой DDL.
 
-Добавлена уборка остатков прошлого прогона и `lock_timeout` на
-подготовку. Без этого прерванный прогон оставляет держателя, и
-следующий `DROP TABLE` в `setup.sql` висит без объяснений — ровно та
-авария, которую глава описывает, случившаяся с самим стендом.
+## Interpretation
+
+`pg_blocking_pids()` показывает у C идентификатор миграции, а не
+держателя `ACCESS SHARE`. Два `ACCESS SHARE` совместимы; C стоит из-за
+того, кто встал между ними в очередь.
+
+## Замечание о валидности
+
+Добавлены уборка остатков прошлого прогона по `application_name` и
+`lock_timeout` на подготовку: иначе прерванный прогон оставляет
+держателя, и `DROP TABLE` в `setup.sql` висит без объяснений.

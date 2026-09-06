@@ -29,7 +29,20 @@ research/          исследовательский материал, в те�
 [docs/measurements.md](docs/measurements.md).
 
 Версионные утверждения, подлежащие сверке перед печатью, собраны в
-[docs/version-claims.md](docs/version-claims.md).
+[docs/version-claims.md](docs/version-claims.md); нерешённое — в
+[docs/provenance-gaps.md](docs/provenance-gaps.md).
+
+## Проверка провенанса
+
+```sh
+python3 tools/check-experiments.py            # нарушения
+python3 tools/check-experiments.py --recheck  # что сверить перед печатью
+```
+
+Скрипт проверяет заголовки `measured.md`, существование путей
+`experiments/...`, упомянутых в книге, уникальность идентификаторов и
+полноту реестра утверждений. Сейчас он находит два расхождения — они
+описаны в `docs/provenance-gaps.md` как PG-001 и PG-002.
 
 ## Статус
 

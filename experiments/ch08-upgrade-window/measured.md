@@ -1,10 +1,8 @@
 ```text
 Experiment:   upgrade-window
-Chapter:      book/pending/13a-upgrade-window.md; статистическая часть
-              относится также к разделу «После upgrade данные те же»
-              главы 8 основной рукописи
+Chapter:      интермеццо после главы 8 в book/Running-PostgreSQL.md
 PostgreSQL:   16.15 (Ubuntu), commit not recorded
-Machine/OS:   см. ../../ENVIRONMENT.md
+Machine/OS:   см. ../ENVIRONMENT.md
 Date:         2026-09-06
 Question:     из чего состоит окно мажорного обновления по времени
 Result:       сбор статистики — доли секунды; перестроение текстовых

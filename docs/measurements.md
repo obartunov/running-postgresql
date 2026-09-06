@@ -1,94 +1,73 @@
-# Измеренное: указатель по главам
+# Измеренное: указатель по текущей рукописи
 
-Соответствие стендов новой нумерации рукописи
-(`book/Running-PostgreSQL.md`, черновик от 6 сентября
-2026). Все числа получены на PostgreSQL 16.15 в одном контейнере, если
-в самом `measured.md` не сказано иное.
+Карта связывает `book/Running-PostgreSQL.md` с воспроизводимыми стендами.
+Все числа получены на PostgreSQL 16.15 в одном контейнере, если в самом
+`measured.md` не сказано иное. Общие ограничения среды — в
+`experiments/ENVIRONMENT.md`.
 
-| глава рукописи | стенд | состояние |
+| место в рукописи | стенд | состояние |
 |---|---|---|
-| 1. Затык кончился | `experiments/ch01-checkpoint` | прогнан |
-| 2. Autovacuum работает | `experiments/ch02-vacuum-horizon` | прогнан |
-| 3. Я добавил колонку | `experiments/ch03-lock-queue` | прогнан |
-| 4. Сколько памяти съест запрос | `experiments/ch04-work-mem` | прогнан |
-| 6. Две тысячи idle connections | `experiments/ch06-connections` | прогнан |
-| 7. PostgreSQL не масштабируется | `experiments/ch07-partitions` | прогнан |
-| 8. Почему planner не выбрал план | `experiments/ch08-estimates` | прогнан |
-| 11. PostgreSQL чего-то не умеет | `experiments/ch11-extensions` | прогнан |
-| 14. Уже запущен, но не готов | `experiments/ch16-restore` | прогнан (см. ниже) |
-| 4. Сколько памяти съест запрос — **несоответствие** | книга ссылается на `ch04-memory-envelope`, которого нет | см. PG-001 |
-| 12. ORM — **несоответствие** | книга ссылается на `ch11-semantic-boundary`, которого нет | см. PG-002 |
-| 15. Replica отстаёт на 400 GB | `experiments/ch15-standby` | прогнан |
-| 15. Replica (логическая часть) | `experiments/ch15-logical` | прогнан частично |
-| 16. Backup зелёный | `experiments/ch16-restore` | прогнан |
+| гл. 1 — checkpoint / tail | `experiments/ch01-checkpoint` | прогнан; центральный p99/checkpoint overlay ещё не построен (PG-012) |
+| гл. 2 — VACUUM horizon | `experiments/ch02-vacuum-horizon` | прогнан |
+| интермеццо после гл. 2 — index bloat / HOT / WAL | `experiments/ch02-index-bloat` | прогнан |
+| гл. 3 — lock queue | `experiments/ch03-lock-queue` | прогнан |
+| гл. 4 — per-query work_mem | `experiments/ch04-work-mem` | прогнан |
+| гл. 4 — concurrency envelope | `experiments/ch04-memory-envelope` | **нет стенда**, PG-001 |
+| гл. 6 — connections / starvation | `experiments/ch06-connections` | прогнан |
+| гл. 7 — partition pruning / lifecycle removal | `experiments/ch07-partitions` | прогнан |
+| гл. 8 — estimates / extended statistics | `experiments/ch08-estimates` | прогнан |
+| интермеццо после гл. 8 — upgrade window | `experiments/ch08-upgrade-window` | прогнан частично: measured post-upgrade work, не сам `pg_upgrade` |
+| гл. 11 — extensions | `experiments/ch11-extensions` | прогнан; один заявленный negative case не покрыт (PG-014) |
+| гл. 12 — semantic boundary / ORM | `experiments/ch11-semantic-boundary` | **нет стенда**, PG-002; имя пути в книге ещё старое |
+| гл. 14 — startup / recovery milestones | `experiments/ch16-restore` | прогнан |
+| гл. 15 — physical standby | `experiments/ch15-standby` | прогнан; один промежуточный режим не прогнан (PG-011) |
+| гл. 15 — logical replication | `experiments/ch15-logical` | прогнан частично (PG-010) |
+| гл. 16 — restore / archive chain | `experiments/ch16-restore` | прогнан |
 
-## Стенды, которым в новой рукописи нет главы
+## Стенды, обслуживающие несколько мест книги
 
-`experiments/unplaced/index-bloat` — раздувание индексов и цена лишнего
-индекса. Единственный полностью измеренный материал, у которого нет
-места в тексте: плотность листьев 89.9 % при сборке, 61.6 % после
-обновлений с вакуумом при удвоении размера, 89.7 % после
-`REINDEX CONCURRENTLY`; цена индекса на обновлении — 145.7 / 170.9 /
-273.6 / 537.0 байта WAL на строку при доле HOT 68.1 / 68.1 / 1.3 / 1.4 %.
+`ch16-restore` даёт два разных результата.
 
-`experiments/unplaced/upgrade-window` — длина окна мажорного
-обновления. Половина материала (`analyze-in-stages` против полного
-`ANALYZE`) ложится в раздел «После upgrade данные те же» главы 8.
-Вторая половина — перестроение текстовых индексов при смене версии
-правил сортировки, 9.28 с на 156 МБ, то есть около 17 МБ/с — сейчас
-без главы.
+Для главы 14:
 
-## Стенды, обслуживающие две главы сразу
+- *first response* — первый нулевой exit code от `psql -c "SELECT 1"`, polling 0.2 s;
+- *replay finished* — первый `false` от `pg_is_in_recovery()`, polling 0.5 s;
+- обе точки отсчитываются от одного `pg_ctl start`;
+- measured: 0.62 s против 3.82 s.
 
-`ch16-restore` даёт числа и для главы 14, и для главы 16.
+Для главы 16 тот же стенд воспроизвёл другой failure mode: простой
+`archive_command` с прямым `cp` был прерван при `pg_ctl -m immediate`,
+и в final archive name остался partial WAL file 851,968 bytes вместо
+16,777,216. Точный сценарий — в `experiments/ch16-restore/measured.md`.
 
-Для главы 14 («уже запущен, но не готов») существенно вот что: сервер
-начал принимать соединения через 0.62 с, а восстановление закончилось
-на 3.82 с. Между этими двумя моментами база отвечает и отдаёт данные на
-момент копии. Готовность проверяется `pg_is_in_recovery() = false`, а
-не подключением.
+## Числа, которые уже вошли в canonical text
 
-Для главы 16 существенно другое: `archive_command` из простого `cp`
-оставила в архиве обрезанный сегмент после остановки сервера в режиме
-`immediate`, и восстановление упало с `archive file has wrong size`.
-Копирование в архив обязано быть атомарным.
-
-## Что сломалось в самих стендах
-
-Семь дефектов, найденных прогонами. Три из них печатали правдоподобный
-результат, доказывая не то, что заявлено:
-
-- **§11** — дамп восстанавливался успешно там, где скрипт обещал отказ:
-  дамп содержит `CREATE EXTENSION`, и на машине с `contrib` строка
-  просто выполняется;
-- **unplaced/upgrade-window** — `analyze-in-stages` мерился при нулевой
-  цели статистики, то есть измерялся пустой проход;
-- **unplaced/index-bloat** — без резерва места на странице HOT
-  невозможен физически, и ключевой контраст главы не воспроизводился.
-
-Два измеряли не тот момент: §16 считала восстановление законченным по
-первому ответу сервера, §15 показывала унаследованный от прошлого
-прогона конфликт. Два ломали следующий прогон: держатель горизонта в
-§2 переживал скрипт, пересборка пары в §15 делала `rm -rf` под живыми
-постмастерами.
-
-## Числа, вошедшие в текст, и где их искать
-
-| число | где измерено |
+| число | источник |
 |---|---|
-| плотность индекса 89.9 / 61.6 / 89.7 % | `unplaced/index-bloat`, часть 1 |
-| WAL на обновление 145.7 → 537.0 B, HOT 68.1 → 1.3 % | `unplaced/index-bloat`, часть 2 |
-| статистика ~0.5 s, `REINDEX` ~9.3 s | `unplaced/upgrade-window` |
-| `DELETE` месяца ~13 MB WAL, ~245 тыс. мёртвых строк | `ch07-partitions` |
-| `DETACH`+`DROP` ~7160 B WAL, 0 мёртвых строк | `ch07-partitions` |
-| первый ответ 0.62 s, конец проигрывания 3.82 s | `ch16-restore`, часть 1 |
-| `backend_xmin` = NULL, `slots.xmin` = 757 | `ch15-standby` |
-| обрезанный сегмент в архиве после `cp` | `ch16-restore`, часть 2 |
+| index density 89.9 → 61.6 → 89.7 % | `ch02-index-bloat`, часть 1 |
+| WAL/update 145.7 → 537.0 B; HOT 68.1 → 1.3 % | `ch02-index-bloat`, часть 2 |
+| statistics ~0.5 s; REINDEX ~9.3 s | `ch08-upgrade-window` |
+| DELETE old month ~13 MB WAL; ~245k dead rows | `ch07-partitions` |
+| whole-partition lifecycle operation ~7 KB WAL; 0 dead rows | `ch07-partitions` |
+| first response 0.62 s; replay finished 3.82 s | `ch16-restore`, часть 1 |
+| `backend_xmin = NULL`, slot `xmin = 757` | `ch15-standby` |
+| partial WAL file after interrupted direct `cp` | `ch16-restore`, часть 2 |
 
-Точные определения точек измерения для двух времён восстановления и
-точный сценарий, при котором остался частичный файл WAL, записаны в
-`ch16-restore/measured.md`, а не здесь.
+Числа — observed properties конкретных стендов, не нормативы PostgreSQL.
+Derived ratios и causal interpretation должны оставаться отдельно в
+соответствующих `measured.md`.
 
-Общий урок для методологии из «Перед стартом»: стенд, который печатает
-ожидаемую форму результата, ещё не измеряет заявленное. Проверять надо
-не только число, но и то, что механизм вообще был задействован.
+## Что прогоны уже сломали в самих экспериментах
+
+Семь дефектов были найдены потому, что стенд печатал правдоподобный
+результат, но измерял не заявленный механизм. Самые показательные:
+
+- extension dump восстанавливался там, где ожидался failure, потому что
+  `CREATE EXTENSION` успешно выполнялся в окружении с `contrib`;
+- первая версия upgrade-window фактически измеряла пустой ANALYZE path;
+- index-bloat без page headroom физически не мог показать HOT contrast;
+- restore completion первоначально принимался за первый ответ сервера;
+- standby conflict мог быть унаследован от предыдущего прогона.
+
+Это часть методологии книги: expected shape результата не является
+доказательством, что механизм был задействован.

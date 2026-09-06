@@ -1,8 +1,8 @@
 ```text
 Experiment:   index-bloat
-Chapter:      book/pending/02a-index-bloat.md (в основной рукописи главы нет)
+Chapter:      интермеццо после главы 2 в book/Running-PostgreSQL.md
 PostgreSQL:   16.15 (Ubuntu), commit not recorded
-Machine/OS:   см. ../../ENVIRONMENT.md
+Machine/OS:   см. ../ENVIRONMENT.md
 Date:         2026-09-06
 Question:     как выглядит раздувание B-tree под потоком обновлений и
               сколько стоит лишний индекс на одном обновлении

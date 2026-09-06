@@ -1212,6 +1212,8 @@ future index cleanup
 
 ### Наш прогон: один индекс изменил режим UPDATE
 
+Стенд — `experiments/ch02-index-bloat/`.
+
 В одном из стендов это было видно сразу по нескольким независимым следам.
 
 После первоначальной сборки измеренная плотность index pages была около 89.9%. После серии UPDATE с VACUUM она упала примерно до 61.6%, а размер index примерно удвоился.
@@ -3077,6 +3079,8 @@ Partitioning может дать и другие operational свойства:
 
 ### Partitioning может уменьшить не latency, а количество созданной maintenance work
 
+Стенд — `experiments/ch07-partitions/`.
+
 Для lifecycle data это особенно важно.
 
 Если business boundary совпадает с partition boundary — например, целый старый месяц больше не нужен, — у нас появляются два принципиально разных физических действия.
@@ -3879,6 +3883,8 @@ new normal operating region
 ```
 
 ### Наш прогон: statistics были не самым длинным хвостом
+
+Стенд — `experiments/ch08-upgrade-window/`.
 
 На одном из стендов восстановление всей нужной optimizer statistics заняло около 0.5 s.
 

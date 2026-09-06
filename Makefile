@@ -1,4 +1,4 @@
-MANUSCRIPT := manuscript/Running-PostgreSQL-Working.md
+MANUSCRIPT := book/Running-PostgreSQL.md
 PANDOC   := pandoc
 PFLAGS   := --pdf-engine=xelatex -V lang=ru-RU -V mainfont="DejaVu Serif" \
             -V monofont="DejaVu Sans Mono" --toc

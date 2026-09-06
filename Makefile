@@ -1,4 +1,4 @@
-CHAPTERS := $(sort $(wildcard chapters/*.md))
+MANUSCRIPT := manuscript/Running-PostgreSQL-Working.md
 PANDOC   := pandoc
 PFLAGS   := --pdf-engine=xelatex -V lang=ru-RU -V mainfont="DejaVu Serif" \
             -V monofont="DejaVu Sans Mono" --toc
@@ -6,11 +6,8 @@ PFLAGS   := --pdf-engine=xelatex -V lang=ru-RU -V mainfont="DejaVu Serif" \
 .PHONY: book clean
 book: running-postgresql.pdf
 
-running-postgresql.pdf: $(CHAPTERS)
-	$(PANDOC) $(PFLAGS) -o $@ $^
-
-ch%: chapters/%*.md
-	$(PANDOC) $(PFLAGS) -o $(basename $(notdir $<)).pdf $<
+running-postgresql.pdf: $(MANUSCRIPT)
+	$(PANDOC) $(PFLAGS) -o $@ $<
 
 clean:
-	rm -f running-postgresql.pdf chapters/*.pdf
+	rm -f running-postgresql.pdf

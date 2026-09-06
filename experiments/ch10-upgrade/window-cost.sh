@@ -9,7 +9,13 @@ t() { date +%s.%N; }
 el() { echo "scale=1; $2 - $1" | bc; }
 
 echo "=== подготовка данных ==="
-pgbench -i -s "${SCALE:-100}" "$DB" > /dev/null 2>&1
+# Ошибки подготовки не прячем: скрипт, который молча падает на -e,
+# отнимает больше времени, чем экономит вывод.
+if ! pgbench -i -s "${SCALE:-100}" "$DB" > results/pgbench-init.log 2>&1; then
+  tail -5 results/pgbench-init.log >&2
+  echo "подготовка данных не удалась, см. results/pgbench-init.log" >&2
+  exit 1
+fi
 psql -X -q -d "$DB" <<'SQL'
 DROP TABLE IF EXISTS texty;
 CREATE TABLE texty AS
@@ -25,43 +31,22 @@ SQL
 
 # --- 1: сколько стоит статистика ---------------------------------------
 # Состояние после обновления на версиях до PG18: данные есть, статистики
-# нет. Воспроизводим, отбирая статистику у пользовательских таблиц.
-echo "=== приводим базу в состояние 'данные есть, статистики нет' ==="
-psql -X -q -d "$DB" -c "
-DO \$\$
-DECLARE r record;
-BEGIN
-  FOR r IN SELECT c.oid::regclass AS t, a.attname
-             FROM pg_class c
-             JOIN pg_namespace n ON n.oid = c.relnamespace
-             JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0
-            WHERE c.relkind = 'r' AND n.nspname = 'public' AND NOT a.attisdropped
-  LOOP
-    EXECUTE format('ALTER TABLE %s ALTER COLUMN %I SET STATISTICS 0', r.t, r.attname);
-  END LOOP;
-END \$\$;"
-psql -X -q -d "$DB" -c "ANALYZE"   # собирает пусто: цель 0
+# нет. Воспроизводится честно: таблицы только что созданы и ни разу не
+# анализировались. Прежняя версия стенда обнуляла цель статистики через
+# SET STATISTICS 0 — при такой цели analyze-in-stages не собирает ничего,
+# и измерялся пустой проход.
+echo "=== база с данными и без статистики ==="
+psql -X -At -d "$DB" -c "
+  SELECT count(*) FILTER (WHERE last_analyze IS NULL
+                            AND last_autoanalyze IS NULL) || ' таблиц без статистики'
+  FROM pg_stat_user_tables"
 
 T0=$(t)
-vacuumdb -d "$DB" --analyze-in-stages > /dev/null 2>&1 || true
+vacuumdb -d "$DB" --analyze-in-stages > results/analyze-stages.log 2>&1
 T1=$(t)
 
-# вернуть цель по умолчанию и собрать полную статистику
-psql -X -q -d "$DB" -c "
-DO \$\$
-DECLARE r record;
-BEGIN
-  FOR r IN SELECT c.oid::regclass AS t, a.attname
-             FROM pg_class c
-             JOIN pg_namespace n ON n.oid = c.relnamespace
-             JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0
-            WHERE c.relkind = 'r' AND n.nspname = 'public' AND NOT a.attisdropped
-  LOOP
-    EXECUTE format('ALTER TABLE %s ALTER COLUMN %I SET STATISTICS -1', r.t, r.attname);
-  END LOOP;
-END \$\$;"
 T2=$(t)
-psql -X -q -d "$DB" -c "ANALYZE" > /dev/null
+vacuumdb -d "$DB" --analyze > results/analyze-full.log 2>&1
 T3=$(t)
 
 # --- 2: сколько стоит перестроение текстовых индексов -------------------
@@ -90,8 +75,8 @@ WHERE a.atttypid IN ('text'::regtype,'varchar'::regtype) AND t.relname='texty'")
 
 {
   echo
-  printf 'analyze-in-stages (первая помощь):  %6s с\n' "$(el $T0 $T1)"
-  printf 'полный ANALYZE:                     %6s с\n' "$(el $T2 $T3)"
+  printf 'analyze-in-stages (три прохода):    %6s с\n' "$(el $T0 $T1)"
+  printf 'ещё один полный ANALYZE:            %6s с\n' "$(el $T2 $T3)"
   printf 'REINDEX текстовых индексов:         %6s с  (объём %s)\n' "$TOTAL" "$TEXT_SIZE"
 } | tee results/window-cost.txt
 

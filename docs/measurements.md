@@ -11,14 +11,15 @@
 | гл. 2 — VACUUM horizon | `experiments/ch02-vacuum-horizon` | прогнан |
 | интермеццо после гл. 2 — index bloat / HOT / WAL | `experiments/ch02-index-bloat` | прогнан |
 | гл. 3 — lock queue | `experiments/ch03-lock-queue` | прогнан |
-| гл. 4 — per-query work_mem | `experiments/ch04-work-mem` | прогнан |
-| гл. 4 — concurrency envelope | `experiments/ch04-memory-envelope` | **нет стенда**, PG-001 |
+| гл. 4 — per-query work_mem | `experiments/ch04-memory-envelope`, часть 1 | прогнан |
+| гл. 4 — concurrency envelope | `experiments/ch04-memory-envelope`, часть 2 | прогнан 2026-09-06 |
 | гл. 6 — connections / starvation | `experiments/ch06-connections` | прогнан |
 | гл. 7 — partition pruning / lifecycle removal | `experiments/ch07-partitions` | прогнан |
 | гл. 8 — estimates / extended statistics | `experiments/ch08-estimates` | прогнан |
 | интермеццо после гл. 8 — upgrade window | `experiments/ch08-upgrade-window` | прогнан частично: measured post-upgrade work, не сам `pg_upgrade` |
 | гл. 11 — extensions | `experiments/ch11-extensions` | прогнан; один заявленный negative case не покрыт (PG-014) |
-| гл. 12 — semantic boundary / ORM | `experiments/ch12-semantic-boundary` | **нет стенда**, PG-002; имя пути в книге ещё старое |
+| гл. 12 — semantic boundary / ORM | `experiments/ch12-semantic-boundary` | прогнан 2026-09-06 |
+| гл. 1 — тень чекпойнта в p99 | `experiments/ch01-checkpoint`, часть 2 | прогнан 2026-09-06, результат отрицательный (PG-015, PG-016) |
 | гл. 14 — startup / recovery milestones | `experiments/ch16-restore` | прогнан |
 | гл. 15 — physical standby | `experiments/ch15-standby` | прогнан; один промежуточный режим не прогнан (PG-011) |
 | гл. 15 — logical replication | `experiments/ch15-logical` | прогнан частично (PG-010) |

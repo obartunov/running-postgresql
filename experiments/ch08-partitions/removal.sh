@@ -29,7 +29,9 @@ measure() {  # $1 = метка, $2 = SQL
   echo "=== до ==="
   psql -X -d "$DB" -c "
     SELECT 'plain' AS t, pg_size_pretty(pg_total_relation_size('events_plain')) AS size
-    UNION ALL SELECT 'part', pg_size_pretty(pg_total_relation_size('events_part'))"
+    UNION ALL
+    SELECT 'part', pg_size_pretty(sum(pg_total_relation_size(i.inhrelid)))
+      FROM pg_inherits i WHERE i.inhparent = 'events_part'::regclass"
 
   echo "=== удаление месяца $MONTH ==="
   measure "DELETE (обычная)  " \

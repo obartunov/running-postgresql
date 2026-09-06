@@ -50,6 +50,9 @@ CREATE INDEX ON events_part  (kind);
 
 VACUUM (ANALYZE) events_plain, events_part;
 
+-- Размер секционированной таблицы считается по секциям: у родителя
+-- своих файлов нет, и pg_total_relation_size на нём даёт ноль.
 SELECT 'plain' AS t, pg_size_pretty(pg_total_relation_size('events_plain')) AS size
 UNION ALL
-SELECT 'part',       pg_size_pretty(pg_total_relation_size('events_part'));
+SELECT 'part', pg_size_pretty(sum(pg_total_relation_size(i.inhrelid)))
+  FROM pg_inherits i WHERE i.inhparent = 'events_part'::regclass;

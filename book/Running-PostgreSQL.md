@@ -5128,7 +5128,7 @@ ORDER BY nepali_date
 ### Эксперимент: invariant, который не пережил два процесса
 
 ```text
-Стенд — experiments/ch11-semantic-boundary/.
+Стенд — experiments/ch12-semantic-boundary/.
 ```
 
 Два варианта схемы.

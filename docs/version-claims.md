@@ -22,7 +22,7 @@ Beta 3.
 Список полей у каждой записи одинаков, чтобы `tools/check-experiments.py`
 мог его разобрать.
 
-Сводка: всего записей — 60, из них к пересверке перед печатью — 31.
+Сводка: всего записей — 65, из них к пересверке перед печатью — 35.
 
 ---
 
@@ -77,7 +77,7 @@ Status: versioned
 Evidence:
 - documentation: release notes 18
 - source / commit: not recorded
-- experiment: unplaced/upgrade-window (косвенно)
+- experiment: ch08-upgrade-window (косвенно)
 
 Last verified: 2026-09-05
 Recheck before print: yes
@@ -434,7 +434,7 @@ Recheck before print: no
 
 ## VC-030
 
-Chapter / section: pending/02a
+Chapter / section: drafts/r2d2-expanded/02a (не canonical)
 Claim: last_idx_scan, last_seq_scan, n_tup_newpage_upd
 PostgreSQL version: 16
 Status: versioned
@@ -448,7 +448,7 @@ Recheck before print: no
 
 ## VC-031
 
-Chapter / section: pending/02a
+Chapter / section: приложение release notes / drafts/r2d2-expanded/02a
 Claim: дедупликация B-tree
 PostgreSQL version: 13
 Status: versioned
@@ -462,7 +462,7 @@ Recheck before print: no
 
 ## VC-032
 
-Chapter / section: pending/02a
+Chapter / section: drafts/r2d2-expanded/02a (не canonical)
 Claim: удаление устаревших версий при заполнении страницы (bottom-up index deletion)
 PostgreSQL version: 14
 Status: versioned
@@ -504,7 +504,7 @@ Recheck before print: no
 
 ## VC-035
 
-Chapter / section: pending/13a
+Chapter / section: drafts/r2d2-expanded/13a (не canonical)
 Claim: для кластеров не на libc после обновления рекомендовано перестроить FTS и pg_trgm индексы
 PostgreSQL version: 18
 Status: versioned
@@ -637,7 +637,7 @@ Status: versioned
 Evidence:
 - documentation: not recorded
 - source / commit: not recorded
-- experiment: unplaced/index-bloat (команда работает в 16)
+- experiment: ch02-index-bloat (команда работает в 16)
 
 Last verified: not verified для версии появления
 Recheck before print: yes
@@ -665,7 +665,7 @@ Status: versioned
 Evidence:
 - documentation: not recorded
 - source / commit: not recorded
-- experiment: unplaced/index-bloat (механизм наблюдается в 16)
+- experiment: ch02-index-bloat (механизм наблюдается в 16)
 
 Last verified: not verified для версии появления
 Recheck before print: yes
@@ -855,16 +855,86 @@ Recheck before print: no
 ## VC-060
 
 Chapter / section: гл. 15
-Claim: при подключении через слот держатель горизонта виден в pg_replication_slots.xmin
-PostgreSQL version: not established
-Status: versioned
+Claim: при hot_standby_feedback и replication slot pg_stat_replication.backend_xmin может быть NULL; horizon показывается в pg_replication_slots.xmin
+PostgreSQL version: 19 beta (целевая версия; дата появления поведения не устанавливается)
+Status: beta/dev
 Evidence:
-- documentation: not recorded
+- documentation: https://www.postgresql.org/docs/19/monitoring-stats.html (backend_xmin прямо описан как NULL при использовании replication slot)
 - source / commit: not recorded
 - experiment: ch15-standby (backend_xmin = NULL, slot xmin = 757)
 
-Last verified: 2026-09-06 наблюдение
+Last verified: 2026-09-06 по документации 19 Beta 3 и стенду
 Recheck before print: yes
+## VC-061
+
+Chapter / section: интермеццо «Проклятие удобной абстракции»
+Claim: TOAST включается примерно после 2 kB row width; unchanged out-of-line fields при UPDATE обычно сохраняются без повторной TOAST work
+PostgreSQL version: 19 beta (целевая версия)
+Status: beta/dev
+Evidence:
+- documentation: https://www.postgresql.org/docs/19/storage-toast.html
+- source / commit: not recorded
+- experiment: нет; JSONB threshold stand в тексте пока только предложен
+
+Last verified: 2026-09-06 по документации 19 Beta 3
+Recheck before print: yes
+
+## VC-062
+
+Chapter / section: гл. 9 / интермеццо про временную архитектуру
+Claim: current pg_duckdb поддерживает CREATE TABLE ... USING duckdb и может передавать analytical execution DuckDB engine (например через duckdb.force_execution)
+PostgreSQL version: external project pg_duckdb, current main 2026-09-06
+Status: versioned
+Evidence:
+- documentation: https://github.com/duckdb/pg_duckdb ; docs/gotchas_and_syntax.md
+- source / commit: not pinned
+- experiment: нет
+
+Last verified: 2026-09-06 по upstream README/docs
+Recheck before print: yes
+
+## VC-063
+
+Chapter / section: гл. 9 / интермеццо про временную архитектуру
+Claim: current pg_clickhouse является PostgreSQL extension/FDW для query pushdown в ClickHouse; pushdown coverage неполна и является развиваемой частью проекта
+PostgreSQL version: external project pg_clickhouse, current main 2026-09-06
+Status: versioned
+Evidence:
+- documentation: https://github.com/ClickHouse/pg_clickhouse
+- source / commit: not pinned
+- experiment: нет
+
+Last verified: 2026-09-06 по upstream README/roadmap
+Recheck before print: yes
+
+## VC-064
+
+Chapter / section: гл. 18, queueing network
+Claim: PostgreSQL 19 различает Buffer wait type, LWLock BufferMapping и IPC BufferIo как разные wait points на пути к buffer/page
+PostgreSQL version: 19 beta
+Status: beta/dev
+Evidence:
+- documentation: https://www.postgresql.org/docs/19/monitoring-stats.html
+- source / commit: not recorded
+- experiment: нет
+
+Last verified: 2026-09-06 по документации 19 Beta 3
+Recheck before print: yes
+
+## VC-065
+
+Chapter / section: гл. 16, archive_command
+Claim: archive_command должен возвращать success только после успешного архивирования; pre-existing WAL file допустим как success только при идентичном полностью сохранённом содержимом
+PostgreSQL version: current documented contract (проверено на 19 beta)
+Status: timeless
+Evidence:
+- documentation: https://www.postgresql.org/docs/19/continuous-archiving.html ; https://www.postgresql.org/docs/19/runtime-config-wal.html
+- source / commit: not recorded
+- experiment: ch16-restore (interrupted direct cp оставил partial final file)
+
+Last verified: 2026-09-06 по документации 19 Beta 3 и стенду
+Recheck before print: no
+
 ---
 
 ## Приложение с release notes

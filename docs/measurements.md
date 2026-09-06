@@ -18,7 +18,7 @@
 | гл. 8 — estimates / extended statistics | `experiments/ch08-estimates` | прогнан |
 | интермеццо после гл. 8 — upgrade window | `experiments/ch08-upgrade-window` | прогнан частично: measured post-upgrade work, не сам `pg_upgrade` |
 | гл. 11 — extensions | `experiments/ch11-extensions` | прогнан; один заявленный negative case не покрыт (PG-014) |
-| гл. 12 — semantic boundary / ORM | `experiments/ch11-semantic-boundary` | **нет стенда**, PG-002; имя пути в книге ещё старое |
+| гл. 12 — semantic boundary / ORM | `experiments/ch12-semantic-boundary` | **нет стенда**, PG-002; имя пути в книге ещё старое |
 | гл. 14 — startup / recovery milestones | `experiments/ch16-restore` | прогнан |
 | гл. 15 — physical standby | `experiments/ch15-standby` | прогнан; один промежуточный режим не прогнан (PG-011) |
 | гл. 15 — logical replication | `experiments/ch15-logical` | прогнан частично (PG-010) |

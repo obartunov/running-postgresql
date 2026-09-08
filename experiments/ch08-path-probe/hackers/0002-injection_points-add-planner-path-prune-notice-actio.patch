@@ -1,6 +1,6 @@
-From 2ec6463c9f9c122af3e3f5bb8eebfeb9acbe1d7c Mon Sep 17 00:00:00 2001
+From b9c71e159a224efd384ba1ee79ddf83d2ed92562 Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
-Date: Tue, 8 Sep 2026 15:23:05 +0000
+Date: Tue, 8 Sep 2026 15:56:13 +0000
 Subject: [PATCH 2/2] injection_points: add planner path-prune notice action
 
 Add a test action for the planner path-pruning injection points.  It emits

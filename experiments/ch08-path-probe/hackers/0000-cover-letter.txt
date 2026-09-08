@@ -96,12 +96,27 @@ Overhead
 The payload structs and their construction exist only under
 USE_INJECTION_POINTS, so ordinary builds are unchanged.
 
-add_path() is hot enough that even a shared-memory lookup per call is worth
-avoiding in builds that do have injection points enabled, including
-buildfarm animals.  The four points are therefore loaded once per planner
-invocation in standard_planner() and consulted through the process-local
-cache.  Whether standard_planner() is the right place for that load is one
-of the open questions below.
+For builds that do have injection points enabled, the four points are
+loaded once per planner invocation and consulted through the process-local
+cache, rather than looked up in shared memory on every add_path() call.
+
+I measured that choice rather than assuming it.  On a six-way join planned
+in a loop, with nothing attached, with and without the cached form:
+
+  cached form:  9654, 9746, 10047 plans/s
+  plain form:   9305, 9574,  9789 plans/s
+
+The medians differ by under 2%, and the spread within each variant is
+larger than the difference.  On this machine and this query the benefit is
+not demonstrated.  The cached form is kept on design grounds - it avoids a
+shared memory lookup in a function called this often - and not because a
+speedup was measured.  A better measurement on a machine that is not a
+single-core container would be welcome.
+
+The load is done in planner(), before planner_hook is consulted.  Doing it
+in standard_planner() would mean that a hook replacing the planner entirely
+leaves the cache empty and the points silently produce nothing, which is
+the worst possible failure mode for diagnostic instrumentation.
 
 Relationship to pg_plan_advice
 ------------------------------
@@ -133,8 +148,9 @@ Open questions
 
   * Is optimizer/pathnode.h an acceptable home for these test-only payload
     structs, guarded by USE_INJECTION_POINTS?
-  * Is standard_planner() the right place to load the points, or should the
-    load happen elsewhere?
+  * Is planner() the right place to load the points?  It is correct with
+    respect to planner_hook, but it costs four cache lookups per planner
+    invocation even when nothing is attached.
   * Are four boundaries the right set, or should accept be dropped in
     favour of a smaller series?
   * Should the names be shorter, e.g. planner-path-precheck-reject?

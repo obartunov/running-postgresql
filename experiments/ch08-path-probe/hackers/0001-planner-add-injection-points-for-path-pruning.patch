@@ -1,13 +1,13 @@
-From 8e3ab5d915fcb87046d044e90905d6eed1d3419d Mon Sep 17 00:00:00 2001
+From d970a1395d116df32eb27dba3a19597373b6b888 Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
-Date: Tue, 8 Sep 2026 15:23:05 +0000
+Date: Tue, 8 Sep 2026 15:56:13 +0000
 Subject: [PATCH 1/2] planner: add injection points for path pruning
 
 EXPLAIN shows the plan that survived planning.  It does not show which
 candidates were considered, which of them were discarded while RelOptInfo
 pathlists were built, or which surviving path displaced another one.
 
-There are three interesting boundaries in pathnode.c:
+There are two functions in pathnode.c where candidates disappear:
 
   * add_path_precheck() can reject a candidate before a Path exists;
   * add_path() can accept a new Path, reject it as dominated, or remove an
@@ -34,19 +34,22 @@ debug instrumentation, not a stable extension API, and both the structs and
 the payload construction exist only in builds configured with
 --enable-injection-points.
 
-add_path() is hot, so the points are loaded once per planner invocation in
-standard_planner() and consulted through the process-local cache rather
-than looked up in shared memory on every call.
+add_path() is called often enough that a shared memory lookup per call is
+worth avoiding, so the points are loaded once per planner invocation and
+consulted through the process-local cache.  The load is done in planner(),
+before planner_hook is consulted: doing it in standard_planner() would mean
+that a hook which replaces the planner entirely leaves the cache empty and
+the injection points silently do nothing.
 
 No planner behavior is changed.
 ---
- src/backend/optimizer/plan/planner.c  | 12 +++++++
+ src/backend/optimizer/plan/planner.c  | 16 +++++++++
  src/backend/optimizer/util/pathnode.c | 49 +++++++++++++++++++++++++++
  src/include/optimizer/pathnode.h      | 35 +++++++++++++++++++
- 3 files changed, 96 insertions(+)
+ 3 files changed, 100 insertions(+)
 
 diff --git a/src/backend/optimizer/plan/planner.c b/src/backend/optimizer/plan/planner.c
-index c3c158a..74ff6b4 100644
+index c3c158a..128de94 100644
 --- a/src/backend/optimizer/plan/planner.c
 +++ b/src/backend/optimizer/plan/planner.c
 @@ -60,6 +60,7 @@
@@ -57,24 +60,28 @@ index c3c158a..74ff6b4 100644
  #include "utils/lsyscache.h"
  #include "utils/rel.h"
  #include "utils/selfuncs.h"
-@@ -357,6 +358,17 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
- 			   *lr,
- 			   *lc;
+@@ -330,6 +331,21 @@ planner(Query *parse, const char *query_string, int cursorOptions,
+ {
+ 	PlannedStmt *result;
  
 +	/*
 +	 * Load the path-pruning injection points once per planner invocation, so
 +	 * that add_path() and add_path_precheck() can consult the process-local
 +	 * cache instead of looking each of them up in shared memory on every
 +	 * call.
++	 *
++	 * This has to happen before planner_hook is consulted: a hook that does
++	 * not call standard_planner() would otherwise leave the cache empty, and
++	 * the injection points would silently do nothing.
 +	 */
 +	INJECTION_POINT_LOAD("planner-add-path-accept");
 +	INJECTION_POINT_LOAD("planner-add-path-reject");
 +	INJECTION_POINT_LOAD("planner-add-path-displace");
 +	INJECTION_POINT_LOAD("planner-add-path-precheck-reject");
 +
- 	/*
- 	 * Set up global state for this planner invocation.  This data is needed
- 	 * across all levels of sub-Query that might exist in the given command,
+ 	if (planner_hook)
+ 		result = (*planner_hook) (parse, query_string, cursorOptions,
+ 								  boundParams, es);
 diff --git a/src/backend/optimizer/util/pathnode.c b/src/backend/optimizer/util/pathnode.c
 index 2ba3176..9cb7939 100644
 --- a/src/backend/optimizer/util/pathnode.c

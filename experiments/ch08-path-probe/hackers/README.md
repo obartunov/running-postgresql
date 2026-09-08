@@ -20,7 +20,13 @@
   вытеснении между двумя путями одного и того же индекса;
 - `path_type_name()` покрывает Sort, Gather, Material, Memoize и другие
   узлы, которые в v2 схлопывались в `Other`;
-- патчи порождены `git format-patch` и накладываются на master.
+- патчи порождены `git format-patch` и накладываются на master;
+- добавлен структурный TAP-тест
+  (`src/test/modules/injection_points/t/001_planner_path_prune.pl`):
+  проверяет, что события наблюдаются, что параметризованный кандидат
+  приходит с непустым `required_outer` и что индексный путь сообщается со
+  своим oid. Текст вывода целиком не сравнивается: в нём стоимости и
+  оценки строк.
 
 ## Проверено
 
@@ -30,7 +36,8 @@
         --without-zlib, CFLAGS=-O1
 APPLY:  PASS
 BUILD:  PASS, без предупреждений
-TESTS:  PASS (src/test/modules/injection_points: 4 и 11 тестов)
+TESTS:  PASS (src/test/modules/injection_points: 4 regress, 11 isolation,
+        7 assertions нового TAP-теста; сборка с --enable-tap-tests)
 DEMO:   PASS, все три требуемых признака воспроизводятся
 ```
 

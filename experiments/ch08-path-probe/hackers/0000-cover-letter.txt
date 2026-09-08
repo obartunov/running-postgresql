@@ -128,20 +128,23 @@ A successful advice does not show that the corresponding path survived the
 unconstrained run, because advice itself changes the search.  The two are
 complementary, and neither substitutes for the other.
 
+Testing
+-------
+
+0002 includes a TAP test that asserts structural facts only: that accept
+and pruning events can be observed, that a parameterized candidate is
+reported with a non-empty required_outer, and that an index path is
+reported with its index oid.  It does not compare the output as a whole,
+because the lines carry costs and row estimates that are not stable across
+platforms or planner changes, and this series should not turn particular
+costs into expectations.
+
 What is deliberately not here
 -----------------------------
 
 Partial paths.  add_partial_path() and add_partial_path_precheck() have
 analogous pruning and no points.  The demo turns parallelism off, so the
 series does not need them; they should be added when a concrete test does.
-
-A regression test for the new action.  Any output that includes costs or a
-specific pruning decision would be fragile across planner and cost model
-changes, and this series should not bless particular costs as expectations.
-A test asserting only structural facts is possible - that an event fires,
-and that a parameterized candidate is reported with a non-empty
-required_outer - and can be added if reviewers want it in this series
-rather than later.
 
 Open questions
 --------------

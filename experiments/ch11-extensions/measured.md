@@ -1,9 +1,6 @@
 ```text
 Experiment:   extension-boundary
-Chapter:      глава 11. ВНИМАНИЕ: рукопись ссылается на
-              experiments/ch11-semantic-boundary/ из главы 12; этого
-              каталога нет, и данный стенд не о том же. См.
-              docs/provenance-gaps.md
+Chapter:      глава 11
 PostgreSQL:   16.15 (Ubuntu) с установленным contrib, commit not recorded
 Machine/OS:   см. ../ENVIRONMENT.md
 Date:         2026-09-06

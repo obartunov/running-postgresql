@@ -52,8 +52,11 @@ pg_replication_slots.xmin         = 757     (slot standby1, active = t)
 слот держателя надо искать в `pg_replication_slots.xmin`, а не только
 в `pg_stat_replication.backend_xmin`, который в этом прогоне был пуст.
 
-Почему `backend_xmin` оказался пустым при работающем feedback, из
-наблюдений не следует. Это записано в `docs/provenance-gaps.md`.
+Пустой `backend_xmin` при работающем feedback не является загадкой
+стенда: документация PG19 прямо говорит, что при использовании
+replication slot это поле остаётся NULL, а xmin standby виден в
+`pg_replication_slots`. Утверждение заведено как VC-060 в
+`docs/version-claims.md`.
 
 ## Замечание о валидности
 

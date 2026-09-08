@@ -189,7 +189,7 @@ Status: versioned
 Evidence:
 - documentation: release notes 13
 - source / commit: not recorded
-- experiment: ch04-work-mem (Batches>1 при 4MB)
+- experiment: ch04-memory-envelope (Batches>1 при 4MB)
 
 Last verified: 2026-09-05
 Recheck before print: no

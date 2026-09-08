@@ -1,0 +1,146 @@
+From abd45295d418a799af6323e2e881ae5ad2fadf44 Mon Sep 17 00:00:00 2001
+From: r2d2 <r2d2@localhost>
+Date: Tue, 8 Sep 2026 14:39:51 +0000
+Subject: [PATCH 1/2] planner: add injection points for path pruning
+
+EXPLAIN shows the winning plan.  It does not show which paths were
+considered, which of them were rejected by add_path(), or which surviving
+path displaced another one.  That information exists only inside a single
+planning run and is currently unreachable without patching the backend.
+
+This adds three injection points to add_path():
+
+  path-pruning-accept    a new path was accepted into the pathlist
+  path-pruning-reject    a new path was rejected as dominated
+  path-pruning-displace  an existing path was removed by the new one
+
+Each point receives a PathPruningInfo describing the relation, the path the
+decision was made about and, where known, the path responsible for the
+decision.  The struct is built only in builds configured with
+--enable-injection-points, so ordinary builds are unaffected.
+
+The motivating case is a parameterized index path: the same physical index
+produces one path with no required_outer and another with required_outer set,
+and these have different fates during planning.  Without visibility into
+add_path() the two cases are indistinguishable from the outside, and a plan
+that does not use an index looks the same whether the index path was pruned
+early or lost later at the join level.
+---
+ src/backend/optimizer/util/pathnode.c | 39 +++++++++++++++++++++++++++
+ src/include/optimizer/pathnode.h      | 12 +++++++++
+ 2 files changed, 51 insertions(+)
+
+diff --git a/src/backend/optimizer/util/pathnode.c b/src/backend/optimizer/util/pathnode.c
+index 2ba3176..fa66f3e 100644
+--- a/src/backend/optimizer/util/pathnode.c
++++ b/src/backend/optimizer/util/pathnode.c
+@@ -25,6 +25,7 @@
+ #include "optimizer/optimizer.h"
+ #include "optimizer/pathnode.h"
+ #include "optimizer/paths.h"
++#include "utils/injection_point.h"
+ #include "optimizer/planmain.h"
+ #include "optimizer/tlist.h"
+ #include "parser/parsetree.h"
+@@ -455,12 +456,42 @@ set_cheapest(RelOptInfo *parent_rel)
+  *
+  * Returns nothing, but modifies parent_rel->pathlist.
+  */
++
++#ifdef USE_INJECTION_POINTS
++/*
++ * Report a path pruning decision to an attached injection point.
++ *
++ * The callback receives a PathPruningInfo describing the relation, the path
++ * the decision was made about, and the path responsible for the decision, if
++ * any.  Building the struct is cheap, but it is still done only in builds
++ * configured with --enable-injection-points.
++ */
++static void
++path_pruning_notify(const char *name, RelOptInfo *rel,
++					Path *path, Path *dominator)
++{
++	PathPruningInfo info;
++
++	info.rel = rel;
++	info.path = path;
++	info.dominator = dominator;
++
++	INJECTION_POINT(name, &info);
++}
++
++#define PATH_PRUNING_NOTIFY(name, rel, path, dominator) \
++	path_pruning_notify(name, rel, path, dominator)
++#else
++#define PATH_PRUNING_NOTIFY(name, rel, path, dominator) ((void) 0)
++#endif
++
+ void
+ add_path(RelOptInfo *parent_rel, Path *new_path)
+ {
+ 	bool		accept_new = true;	/* unless we find a superior old path */
+ 	int			insert_at = 0;	/* where to insert new item */
+ 	List	   *new_path_pathkeys;
++	Path	   *dominator = NULL;	/* old path that rejected new_path */
+ 	ListCell   *p1;
+ 
+ 	/*
+@@ -627,6 +658,8 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
+ 			/*
+ 			 * Delete the data pointed-to by the deleted cell, if possible
+ 			 */
++			PATH_PRUNING_NOTIFY("path-pruning-displace", parent_rel,
++								old_path, new_path);
+ 			if (!IsA(old_path, IndexPath))
+ 				pfree(old_path);
+ 		}
+@@ -648,17 +681,23 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
+ 		 * new_path cannot dominate any other elements of the pathlist.
+ 		 */
+ 		if (!accept_new)
++		{
++			dominator = old_path;
+ 			break;
++		}
+ 	}
+ 
+ 	if (accept_new)
+ 	{
++		PATH_PRUNING_NOTIFY("path-pruning-accept", parent_rel, new_path, NULL);
+ 		/* Accept the new path: insert it at proper place in pathlist */
+ 		parent_rel->pathlist =
+ 			list_insert_nth(parent_rel->pathlist, insert_at, new_path);
+ 	}
+ 	else
+ 	{
++		PATH_PRUNING_NOTIFY("path-pruning-reject", parent_rel, new_path,
++							dominator);
+ 		/* Reject and recycle the new path */
+ 		if (!IsA(new_path, IndexPath))
+ 			pfree(new_path);
+diff --git a/src/include/optimizer/pathnode.h b/src/include/optimizer/pathnode.h
+index e8db321..ec7da2f 100644
+--- a/src/include/optimizer/pathnode.h
++++ b/src/include/optimizer/pathnode.h
+@@ -55,6 +55,18 @@ extern int	compare_path_costs(Path *path1, Path *path2,
+ extern int	compare_fractional_path_costs(Path *path1, Path *path2,
+ 										  double fraction);
+ extern void set_cheapest(RelOptInfo *parent_rel);
++/*
++ * Payload passed to the path pruning injection points.  "path" is the path
++ * the decision was made about; "dominator" is the path that caused it to be
++ * rejected or displaced, when one is known, and NULL otherwise.
++ */
++typedef struct PathPruningInfo
++{
++	RelOptInfo *rel;
++	Path	   *path;
++	Path	   *dominator;
++} PathPruningInfo;
++
+ extern void add_path(RelOptInfo *parent_rel, Path *new_path);
+ extern bool add_path_precheck(RelOptInfo *parent_rel, int disabled_nodes,
+ 							  Cost startup_cost, Cost total_cost,
+-- 
+2.43.0
+

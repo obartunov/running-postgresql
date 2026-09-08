@@ -200,6 +200,15 @@ REL_16_STABLE.
 `pg_plan_advice.advice`, сверив синтаксис классов advice на конкретной
 сборке.
 
+**Статус на 2026-09-08.** Половина вопроса закрыта иначе, чем
+планировалось: события add_path() оформлены как injection points и
+собраны в серию для pgsql-hackers (`experiments/ch08-path-probe/hackers`).
+Серия прогнана на master 20devel с `--enable-injection-points`, вывод в
+`demo/observed-notices.txt`.
+
+Слой `pg_plan_advice` по-прежнему не проверен: модуль в PG19, сборка
+сделана из master, и опыт с `pg_plan_advice.advice` не ставился.
+
 **Приоритет:** высокий: без этого слоя опыт отвечает только на половину
 вопроса главы.
 

@@ -1,0 +1,12 @@
+NOTICE:  path-pruning-displace: rel {1} node 346 pathkeys 0 req_outer {} by-dominator
+NOTICE:  path-pruning-reject: rel {1} node 351 pathkeys 0 req_outer {} by-dominator
+NOTICE:  path-pruning-reject: rel {1} node 351 pathkeys 0 req_outer {2} by-dominator
+NOTICE:  path-pruning-reject: rel {2} node 351 pathkeys 0 req_outer {1} by-dominator
+NOTICE:  path-pruning-reject: rel {2} node 375 pathkeys 0 req_outer {} by-dominator
+NOTICE:  path-pruning-reject: rel {2} node 376 pathkeys 1 req_outer {} by-dominator
+NOTICE:  path-pruning-displace: rel {1 2} node 365 pathkeys 0 req_outer {} by-dominator
+NOTICE:  path-pruning-reject: rel {1 2} node 363 pathkeys 0 req_outer {} by-dominator
+NOTICE:  path-pruning-reject: rel {1 2} node 363 pathkeys 0 req_outer {} by-dominator
+NOTICE:  path-pruning-reject: rel {1 2} node 363 pathkeys 0 req_outer {} by-dominator
+NOTICE:  path-pruning-displace: rel {1 2} node 363 pathkeys 0 req_outer {} by-dominator
+NOTICE:  path-pruning-reject: rel {1 2} node 375 pathkeys 0 req_outer {} by-dominator

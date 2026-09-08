@@ -1,0 +1,23 @@
+решение   rel    узел                  startup        total      rows  pk req_outer
+accepted  1      T_SeqScan                0.00       409.00      4900   0      none
+removed   1      T_SeqScan                0.00       409.00      4900   0      none
+accepted  1      T_IndexOnlyScan          0.29       154.29      4900   1      none  index=16388
+accepted  1      T_IndexOnlyScan          0.29         0.31         1   1         2  index=16388
+rejected  1      T_BitmapHeapScan       106.51       289.01      4900   0      none
+rejected  1      T_BitmapHeapScan         0.30         4.32         1   0         2
+accepted  2      T_SeqScan                0.00     32739.00   2000000   0      none
+accepted  2      T_IndexScan              0.43     87908.16   2000000   1      none  index=16395
+accepted  2      T_IndexScan              0.43        14.01       101   1         1  index=16395
+rejected  2      T_BitmapHeapScan         2.63        15.75       101   0         1
+rejected  2      T_Gather              1000.00    222072.33   2000000   0      none
+rejected  2      T_GatherMerge         1000.45    308091.14   2000000   1      none
+accepted  1,2    T_MergeJoin         324087.97    344154.22    490000   0      none
+removed   1,2    T_MergeJoin         324087.97    344154.22    490000   0      none
+accepted  1,2    T_NestLoop               0.71     73766.55    490000   0      none
+rejected  1,2    T_NestLoop               0.72     75192.16    490000   0      none
+rejected  1,2    T_NestLoop               0.30     88903.78    490000   0      none
+rejected  1,2    T_NestLoop               0.29 147025558.54    490000   0      none
+removed   1,2    T_NestLoop               0.71     73766.55    490000   0      none
+accepted  1,2    T_HashJoin             215.54     38205.65    490000   0      none
+rejected  1,2    T_Gather              1215.54     73475.84    490000   0      none
+accepted  ?      T_HashJoin             215.54     38205.65    490000   0      none

@@ -1,0 +1,100 @@
+diff --git a/src/backend/optimizer/util/pathnode.c b/src/backend/optimizer/util/pathnode.c
+index bd02b7b..3309980 100644
+--- a/src/backend/optimizer/util/pathnode.c
++++ b/src/backend/optimizer/util/pathnode.c
+@@ -26,6 +26,7 @@
+ #include "optimizer/optimizer.h"
+ #include "optimizer/pathnode.h"
+ #include "optimizer/paths.h"
++#include "lib/stringinfo.h"
+ #include "optimizer/placeholder.h"
+ #include "optimizer/planmain.h"
+ #include "optimizer/prep.h"
+@@ -423,6 +424,64 @@ set_cheapest(RelOptInfo *parent_rel)
+  *
+  * Returns nothing, but modifies parent_rel->pathlist.
+  */
++
++/*
++ * Path Probe: инструментовка add_path() для книги "Работающий PostgreSQL".
++ * Не является частью upstream PostgreSQL. Пишет в лог одну строку на
++ * каждое решение add_path(), чтобы было видно, какие Paths создавались и
++ * какой из них кого вытеснил.
++ *
++ * Включается на уровне сессии:  SET client_min_messages = debug1;
++ * Фильтровать по префиксу PATHPROBE.
++ */
++static void
++path_probe_log(const char *event, RelOptInfo *rel, Path *path)
++{
++	StringInfoData buf;
++	Relids		req_outer = PATH_REQ_OUTER(path);
++
++	initStringInfo(&buf);
++	appendStringInfo(&buf, "PATHPROBE %s rel=", event);
++	if (rel->relids)
++	{
++		int			x = -1;
++		bool		first = true;
++
++		while ((x = bms_next_member(rel->relids, x)) >= 0)
++		{
++			appendStringInfo(&buf, "%s%d", first ? "" : ",", x);
++			first = false;
++		}
++	}
++	else
++		appendStringInfoString(&buf, "?");
++
++	appendStringInfo(&buf, " node=%d startup=%.2f total=%.2f rows=%.0f pathkeys=%d req_outer=",
++					 (int) path->pathtype, path->startup_cost,
++					 path->total_cost, path->rows,
++					 list_length(path->pathkeys));
++	if (req_outer)
++	{
++		int			x = -1;
++		bool		first = true;
++
++		while ((x = bms_next_member(req_outer, x)) >= 0)
++		{
++			appendStringInfo(&buf, "%s%d", first ? "" : ",", x);
++			first = false;
++		}
++	}
++	else
++		appendStringInfoString(&buf, "none");
++
++	if (IsA(path, IndexPath))
++		appendStringInfo(&buf, " index=%u",
++						 ((IndexPath *) path)->indexinfo->indexoid);
++
++	elog(DEBUG1, "%s", buf.data);
++	pfree(buf.data);
++}
++
+ void
+ add_path(RelOptInfo *parent_rel, Path *new_path)
+ {
+@@ -595,6 +654,7 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
+ 			/*
+ 			 * Delete the data pointed-to by the deleted cell, if possible
+ 			 */
++			path_probe_log("removed", parent_rel, old_path);
+ 			if (!IsA(old_path, IndexPath))
+ 				pfree(old_path);
+ 		}
+@@ -616,12 +676,14 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
+ 
+ 	if (accept_new)
+ 	{
++		path_probe_log("accepted", parent_rel, new_path);
+ 		/* Accept the new path: insert it at proper place in pathlist */
+ 		parent_rel->pathlist =
+ 			list_insert_nth(parent_rel->pathlist, insert_at, new_path);
+ 	}
+ 	else
+ 	{
++		path_probe_log("rejected", parent_rel, new_path);
+ 		/* Reject and recycle the new path */
+ 		if (!IsA(new_path, IndexPath))
+ 			pfree(new_path);

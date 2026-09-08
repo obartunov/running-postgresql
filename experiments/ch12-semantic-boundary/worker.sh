@@ -1,62 +1,33 @@
 #!/bin/bash
-# Один воркер: ITER попыток забронировать ресурс на пересекающийся
-# интервал. Проверка "свободно ли" делается в приложении — именно так,
-# как её пишут поверх ORM.
+# Один воркер: пытается забронировать интервал по шаблону, который
+# используют почти все приложения — сначала проверка, потом вставка.
 #
-#   worker.sh <режим> <итераций> <resource_id>
+#   worker.sh <таблица> <итераций> <файл для счётчика отказов>
 set -euo pipefail
-MODE="$1"; ITER="$2"; RES="$3"
+TABLE="$1"; ITER="$2"; ERRFILE="$3"
 DB=${PGDATABASE:-sem_bench}
-OKFILE=${OKFILE:-/dev/null}
-ERRFILE=${ERRFILE:-/dev/null}
+ERRORS=0
 
-ok=0; err=0
 for i in $(seq 1 "$ITER"); do
-  # все воркеры целятся в один и тот же час: пересечение гарантировано
-  SLOT="2026-10-01 10:00:00+00"
-  END="2026-10-01 11:00:00+00"
+  # все воркеры целятся в один и тот же интервал одного ресурса:
+  # это худший случай, а не редкий
+  LO="2026-01-0$(( (i % 9) + 1 )) 10:00"
+  HI="2026-01-0$(( (i % 9) + 1 )) 12:00"
 
-  case "$MODE" in
-    # Проверка в приложении: сначала SELECT, потом INSERT.
-    precheck)
-      OUT=$(psql -X -At -d "$DB" <<SQL 2>&1
+  OUT=$(psql -X -q -d "$DB" -v ON_ERROR_STOP=1 2>&1 <<SQL || true
 BEGIN;
-SELECT count(*) AS busy FROM bookings
- WHERE resource_id = $RES
-   AND tstzrange(starts_at, ends_at) && tstzrange('$SLOT', '$END');
+SELECT count(*) AS busy FROM $TABLE
+ WHERE resource_id = 1 AND during && tstzrange('$LO','$HI') \\gset
+\\if :busy
+  ROLLBACK;
+\\else
+  SELECT pg_sleep(0.02);
+  INSERT INTO $TABLE (resource_id, during)
+       VALUES (1, tstzrange('$LO','$HI'));
+  COMMIT;
+\\endif
 SQL
-      ) || true
-      BUSY=$(echo "$OUT" | tail -1)
-      # пауза между проверкой и вставкой — то самое окно, которое в
-      # приложении существует всегда, просто обычно короче
-      sleep 0.05
-      if [ "$BUSY" = "0" ]; then
-        if psql -X -q -d "$DB" -c \
-             "INSERT INTO bookings (resource_id, starts_at, ends_at)
-              VALUES ($RES, '$SLOT', '$END')" >/dev/null 2>&1
-        then ok=$((ok+1)); else err=$((err+1)); fi
-      fi ;;
-
-    # Тот же код приложения, но инвариант объявлен в базе.
-    constraint)
-      OUT=$(psql -X -At -d "$DB" <<SQL 2>&1
-BEGIN;
-SELECT count(*) AS busy FROM bookings
- WHERE resource_id = $RES
-   AND tstzrange(starts_at, ends_at) && tstzrange('$SLOT', '$END');
-SQL
-      ) || true
-      BUSY=$(echo "$OUT" | tail -1)
-      sleep 0.05
-      if [ "$BUSY" = "0" ]; then
-        if psql -X -q -d "$DB" -c \
-             "INSERT INTO bookings (resource_id, starts_at, ends_at)
-              VALUES ($RES, '$SLOT', '$END')" >/dev/null 2>&1
-        then ok=$((ok+1)); else err=$((err+1)); fi
-      fi ;;
-
-    *) echo "неизвестный режим: $MODE" >&2; exit 2 ;;
-  esac
+  )
+  echo "$OUT" | grep -qE 'ERROR|ОШИБКА' && ERRORS=$((ERRORS+1))
 done
-echo "$ok" >> "$OKFILE"
-echo "$err" >> "$ERRFILE"
+echo "$ERRORS" >> "$ERRFILE"

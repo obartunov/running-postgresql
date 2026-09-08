@@ -1,0 +1,269 @@
+From 6caf4aa14403858cf1548ccb5d111cc217fe8d70 Mon Sep 17 00:00:00 2001
+From: r2d2 <r2d2@localhost>
+Date: Tue, 8 Sep 2026 15:23:05 +0000
+Subject: [PATCH 2/2] injection_points: add planner path-prune notice action
+
+Add a test action for the planner path-pruning injection points.  It emits
+one NOTICE line per event using simple key=value fields.
+
+The existing "notice" action treats the injection point argument as a
+string, so attaching it to a point that passes a typed payload prints
+garbage; this action understands the payload instead.
+
+Two details are worth noting.  Upper relations have no relids, so they are
+reported as "upper" rather than as an empty set that would look like a
+relation.  Bitmap paths are attributed to the index of their bitmap qual,
+because otherwise a displacement between two paths over the same physical
+index appears to involve no index at all.
+
+This is a test helper, not a planner reporting API.
+---
+ .../injection_points/injection_points.c       | 210 ++++++++++++++++++
+ 1 file changed, 210 insertions(+)
+
+diff --git a/src/test/modules/injection_points/injection_points.c b/src/test/modules/injection_points/injection_points.c
+index 66d8158..d6a8c91 100644
+--- a/src/test/modules/injection_points/injection_points.c
++++ b/src/test/modules/injection_points/injection_points.c
+@@ -21,7 +21,10 @@
+ #include "funcapi.h"
+ #include "injection_points.h"
+ #include "miscadmin.h"
++#include "lib/stringinfo.h"
++#include "nodes/pathnodes.h"
+ #include "nodes/pg_list.h"
++#include "optimizer/pathnode.h"
+ #include "nodes/value.h"
+ #include "storage/dsm_registry.h"
+ #include "storage/ipc.h"
+@@ -81,6 +84,9 @@ extern PGDLLEXPORT void injection_notice(const char *name,
+ extern PGDLLEXPORT void injection_wait(const char *name,
+ 									   const void *private_data,
+ 									   void *arg);
++extern PGDLLEXPORT void injection_path_prune_notice(const char *name,
++													const void *private_data,
++													void *arg);
+ 
+ /* track if injection points attached in this process are linked to it */
+ static bool injection_point_local = false;
+@@ -222,6 +228,208 @@ injection_notice(const char *name, const void *private_data, void *arg)
+ 		elog(NOTICE, "notice triggered for injection point %s", name);
+ }
+ 
++#ifdef USE_INJECTION_POINTS
++/*
++ * Helpers for the planner path-pruning notice action.
++ */
++static const char *
++path_type_name(const Path *path)
++{
++	if (path == NULL)
++		return "none";
++
++	switch (path->pathtype)
++	{
++		case T_SeqScan:
++			return "SeqScan";
++		case T_IndexScan:
++			return "IndexScan";
++		case T_IndexOnlyScan:
++			return "IndexOnlyScan";
++		case T_BitmapHeapScan:
++			return "BitmapHeapScan";
++		case T_TidScan:
++			return "TidScan";
++		case T_NestLoop:
++			return "NestLoop";
++		case T_MergeJoin:
++			return "MergeJoin";
++		case T_HashJoin:
++			return "HashJoin";
++		case T_Sort:
++			return "Sort";
++		case T_IncrementalSort:
++			return "IncrementalSort";
++		case T_Gather:
++			return "Gather";
++		case T_GatherMerge:
++			return "GatherMerge";
++		case T_Material:
++			return "Material";
++		case T_Memoize:
++			return "Memoize";
++		default:
++			return "Other";
++	}
++}
++
++/*
++ * Describe the relation a path belongs to.  Upper relations have no relids,
++ * so report their kind instead of printing an empty set as if it were one.
++ */
++static char *
++rel_to_cstring(RelOptInfo *rel)
++{
++	StringInfoData buf;
++	int			member = -1;
++	bool		first = true;
++
++	initStringInfo(&buf);
++
++	if (rel->reloptkind == RELOPT_UPPER_REL ||
++		rel->reloptkind == RELOPT_OTHER_UPPER_REL)
++	{
++		appendStringInfoString(&buf, "upper");
++		return buf.data;
++	}
++
++	appendStringInfoChar(&buf, '{');
++	while (rel->relids != NULL &&
++		   (member = bms_next_member(rel->relids, member)) >= 0)
++	{
++		if (!first)
++			appendStringInfoChar(&buf, ',');
++		appendStringInfo(&buf, "%d", member);
++		first = false;
++	}
++	appendStringInfoChar(&buf, '}');
++
++	return buf.data;
++}
++
++static char *
++relids_to_cstring(Relids relids)
++{
++	StringInfoData buf;
++	int			member = -1;
++	bool		first = true;
++
++	initStringInfo(&buf);
++	appendStringInfoChar(&buf, '{');
++	while (relids != NULL && (member = bms_next_member(relids, member)) >= 0)
++	{
++		if (!first)
++			appendStringInfoChar(&buf, ',');
++		appendStringInfo(&buf, "%d", member);
++		first = false;
++	}
++	appendStringInfoChar(&buf, '}');
++
++	return buf.data;
++}
++
++/*
++ * Index behind a path, if any.  Bitmap paths are reported by the index of
++ * the bitmap qual they are built on, because otherwise a displacement
++ * between two paths over the same physical index looks like a displacement
++ * involving no index at all.
++ */
++static Oid
++path_index_oid(const Path *path)
++{
++	if (path == NULL)
++		return InvalidOid;
++
++	if (IsA(path, IndexPath))
++		return ((const IndexPath *) path)->indexinfo->indexoid;
++
++	if (IsA(path, BitmapHeapPath))
++		return path_index_oid(((const BitmapHeapPath *) path)->bitmapqual);
++
++	return InvalidOid;
++}
++#endif
++
++/*
++ * injection_path_prune_notice
++ *
++ * Report one planner path-pruning event as a single NOTICE line.  This is a
++ * test helper, not a planner reporting API.
++ */
++void
++injection_path_prune_notice(const char *name,
++							const void *private_data,
++							void *arg)
++{
++#ifdef USE_INJECTION_POINTS
++	const InjectionPointCondition *condition = private_data;
++
++	Assert(arg != NULL);
++
++	if (!injection_point_allowed(condition, NULL))
++		return;
++
++	if (strcmp(name, "planner-add-path-precheck-reject") == 0)
++	{
++		PlannerPathPrecheckInjectionData *data = arg;
++		char	   *rel = rel_to_cstring(data->parent_rel);
++		char	   *required_outer = relids_to_cstring(data->required_outer);
++
++		elog(NOTICE,
++			 "PLANNER_PATH event=precheck-reject rel=%s "
++			 "startup=%.2f total=%.2f disabled=%d pathkeys=%d "
++			 "required_outer=%s "
++			 "old_type=%s old_index=%u old_startup=%.2f old_total=%.2f",
++			 rel, data->startup_cost, data->total_cost,
++			 data->disabled_nodes, list_length(data->pathkeys),
++			 required_outer,
++			 path_type_name(data->old_path),
++			 path_index_oid(data->old_path),
++			 data->old_path->startup_cost, data->old_path->total_cost);
++		pfree(rel);
++		pfree(required_outer);
++	}
++	else
++	{
++		PlannerPathComparisonInjectionData *data = arg;
++		const char *event;
++		char	   *rel;
++		char	   *new_outer;
++		char	   *old_outer;
++
++		if (strcmp(name, "planner-add-path-accept") == 0)
++			event = "accept";
++		else if (strcmp(name, "planner-add-path-reject") == 0)
++			event = "reject";
++		else
++			event = "displace";
++
++		rel = rel_to_cstring(data->parent_rel);
++		new_outer = relids_to_cstring(PATH_REQ_OUTER(data->new_path));
++		old_outer = data->old_path ?
++			relids_to_cstring(PATH_REQ_OUTER(data->old_path)) : pstrdup("none");
++
++		elog(NOTICE,
++			 "PLANNER_PATH event=%s rel=%s "
++			 "new_type=%s new_index=%u new_startup=%.2f new_total=%.2f "
++			 "new_pathkeys=%d new_required_outer=%s "
++			 "old_type=%s old_index=%u old_required_outer=%s",
++			 event, rel,
++			 path_type_name(data->new_path), path_index_oid(data->new_path),
++			 data->new_path->startup_cost, data->new_path->total_cost,
++			 list_length(data->new_path->pathkeys), new_outer,
++			 path_type_name(data->old_path), path_index_oid(data->old_path),
++			 old_outer);
++
++		pfree(rel);
++		pfree(new_outer);
++		pfree(old_outer);
++	}
++#else
++	elog(ERROR, "injection points are not supported by this build");
++#endif
++}
++
+ /*
+  * Error cleanup callback for injection point waits.
+  */
+@@ -335,6 +543,8 @@ injection_points_attach(PG_FUNCTION_ARGS)
+ 		function = "injection_notice";
+ 	else if (strcmp(action, "wait") == 0)
+ 		function = "injection_wait";
++	else if (strcmp(action, "path-prune-notice") == 0)
++		function = "injection_path_prune_notice";
+ 	else
+ 		elog(ERROR, "incorrect action \"%s\" for injection point creation", action);
+ 
+-- 
+2.43.0
+

@@ -1,0 +1,146 @@
+Subject: [PATCH v3 0/2] planner: add injection points for path pruning
+
+EXPLAIN shows the plan that survived planning.  It does not show what
+happened to the other candidates, and that is the question people actually
+have when an index exists, looks applicable, and does not appear in the
+plan.
+
+There are three boundaries in pathnode.c where candidates disappear:
+
+  * add_path_precheck() can reject a candidate before a Path exists;
+  * add_path() can reject a newly built Path;
+  * add_path() can remove an older Path that had survived until then.
+
+This series adds injection points at those boundaries, plus one at
+acceptance, and a small action in the existing injection_points test module
+that prints the relevant planner properties as one NOTICE line.
+
+  0001  planner: add injection points for path pruning
+  0002  injection_points: add planner path-prune notice action
+
+Why the accept event is included
+--------------------------------
+
+The motivating question is not "was this path discarded" but "was it
+discarded early, or did it survive and lose later".  Those two situations
+call for completely different actions, and the deaths alone cannot tell
+them apart: a path that survived produces no event at all.
+
+Concretely, one physical index produces two different candidates, and on
+the demo data set the trace shows both:
+
+  event=accept   rel={2} new_type=IndexScan new_index=32826
+                 new_required_outer={}
+  event=accept   rel={2} new_type=IndexScan new_index=32826
+                 new_required_outer={1}
+  event=displace rel={2} new_type=BitmapHeapScan new_index=32826
+                 new_required_outer={1}
+                 old_type=IndexScan old_index=32826
+                 old_required_outer={1}
+
+The unparameterized path over that index and the parameterized one are not
+the same planner candidate, and the displacement happens between two paths
+over the same physical index.  Without the accept event only the third line
+exists, and the first two facts are unobservable.
+
+The second demo query is the case that motivates the series: a wider outer
+relation, and an index that does not appear in the final plan at all.
+
+  Hash Join  (cost=210.28..31730.39 rows=497216)
+    ->  Seq Scan on pp_orders o  (cost=0.00..28894.00 rows=1000000)
+    ->  Hash -> Index Only Scan using pp_customers_pkey on pp_customers c
+
+The trace for that query, abridged:
+
+  event=accept   rel={2}   new_type=IndexScan new_index=32826
+                 new_total=86426.48 new_required_outer={}
+  event=accept   rel={2}   new_type=IndexScan new_index=32826
+                 new_total=16.19    new_required_outer={1}
+  event=accept   rel={1,2} new_type=NestLoop  new_total=56961.08
+  event=displace rel={1,2} new_type=HashJoin  new_total=31730.39
+                 old_type=NestLoop
+
+Both candidates over that index are accepted, including the parameterized
+one; the Nested Loop built on top of it is accepted as well and is then
+displaced by a cheaper Hash Join.  The index was not pruned - the join
+method above it lost.  That distinction is the whole point, and it is not
+derivable from EXPLAIN.
+
+Event counts on the first demo query, which are themselves informative:
+
+  accept          16
+  precheck-reject 16
+  reject           3
+  displace         3
+
+Half of the pruning happens in add_path_precheck(), before any Path is
+built.  That is hard to learn any other way and is the reason the precheck
+boundary is included.
+
+Lifetimes
+---------
+
+Every point fires while the path it describes is still live: displace fires
+before the list cell is deleted and before pfree(); reject fires before
+new_path is freed after the loop.  No callback can observe a freed Path.
+
+The precheck payload has no new Path pointer, because at that boundary no
+Path has been built.  It carries the proposed costs, disabled_nodes,
+pathkeys and required_outer instead.  That asymmetry is a property of the
+planner boundary, not of the instrumentation.
+
+Overhead
+--------
+
+The payload structs and their construction exist only under
+USE_INJECTION_POINTS, so ordinary builds are unchanged.
+
+add_path() is hot enough that even a shared-memory lookup per call is worth
+avoiding in builds that do have injection points enabled, including
+buildfarm animals.  The four points are therefore loaded once per planner
+invocation in standard_planner() and consulted through the process-local
+cache.  Whether standard_planner() is the right place for that load is one
+of the open questions below.
+
+Relationship to pg_plan_advice
+------------------------------
+
+pg_plan_advice answers "can the planner produce this plan shape if its
+choices are constrained".  These injection points answer a different
+question: "what happened to the candidates during the normal planning run".
+A successful advice does not show that the corresponding path survived the
+unconstrained run, because advice itself changes the search.  The two are
+complementary, and neither substitutes for the other.
+
+What is deliberately not here
+-----------------------------
+
+Partial paths.  add_partial_path() and add_partial_path_precheck() have
+analogous pruning and no points.  The demo turns parallelism off, so the
+series does not need them; they should be added when a concrete test does.
+
+A regression test for the new action.  Any output that includes costs or a
+specific pruning decision would be fragile across planner and cost model
+changes, and this series should not bless particular costs as expectations.
+A test asserting only structural facts is possible - that an event fires,
+and that a parameterized candidate is reported with a non-empty
+required_outer - and can be added if reviewers want it in this series
+rather than later.
+
+Open questions
+--------------
+
+  * Is optimizer/pathnode.h an acceptable home for these test-only payload
+    structs, guarded by USE_INJECTION_POINTS?
+  * Is standard_planner() the right place to load the points, or should the
+    load happen elsewhere?
+  * Are four boundaries the right set, or should accept be dropped in
+    favour of a smaller series?
+  * Should the names be shorter, e.g. planner-path-precheck-reject?
+
+Demo
+----
+
+The attached demo is SQL plus a POSIX shell script, with no Python
+dependency, and it does not assert a final plan.  demo/trace-observed.log
+is the trace produced by the run described above, for reference.

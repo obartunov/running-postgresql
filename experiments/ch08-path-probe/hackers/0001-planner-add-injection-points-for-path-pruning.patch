@@ -1,146 +1,212 @@
-From abd45295d418a799af6323e2e881ae5ad2fadf44 Mon Sep 17 00:00:00 2001
+From 8e3ab5d915fcb87046d044e90905d6eed1d3419d Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
-Date: Tue, 8 Sep 2026 14:39:51 +0000
+Date: Tue, 8 Sep 2026 15:23:05 +0000
 Subject: [PATCH 1/2] planner: add injection points for path pruning
 
-EXPLAIN shows the winning plan.  It does not show which paths were
-considered, which of them were rejected by add_path(), or which surviving
-path displaced another one.  That information exists only inside a single
-planning run and is currently unreachable without patching the backend.
+EXPLAIN shows the plan that survived planning.  It does not show which
+candidates were considered, which of them were discarded while RelOptInfo
+pathlists were built, or which surviving path displaced another one.
 
-This adds three injection points to add_path():
+There are three interesting boundaries in pathnode.c:
 
-  path-pruning-accept    a new path was accepted into the pathlist
-  path-pruning-reject    a new path was rejected as dominated
-  path-pruning-displace  an existing path was removed by the new one
+  * add_path_precheck() can reject a candidate before a Path exists;
+  * add_path() can accept a new Path, reject it as dominated, or remove an
+    older Path that had survived earlier comparisons.
 
-Each point receives a PathPruningInfo describing the relation, the path the
-decision was made about and, where known, the path responsible for the
-decision.  The struct is built only in builds configured with
---enable-injection-points, so ordinary builds are unaffected.
+This adds four injection points at those boundaries:
 
-The motivating case is a parameterized index path: the same physical index
-produces one path with no required_outer and another with required_outer set,
-and these have different fates during planning.  Without visibility into
-add_path() the two cases are indistinguishable from the outside, and a plan
-that does not use an index looks the same whether the index path was pruned
-early or lost later at the join level.
+  planner-add-path-accept
+  planner-add-path-reject
+  planner-add-path-displace
+  planner-add-path-precheck-reject
+
+The accept event matters as much as the rejections: the question a user
+actually asks is whether a candidate was pruned early or survived and lost
+later, and that cannot be answered from the deaths alone.
+
+The points fire before the path leaves the pathlist and before it is freed,
+so a callback never observes a freed Path.  The precheck point reports the
+proposed path by its properties, because no Path exists yet at that point.
+
+The payloads contain planner-local pointers and are meaningful only to
+callbacks compiled against the same PostgreSQL sources.  They are test and
+debug instrumentation, not a stable extension API, and both the structs and
+the payload construction exist only in builds configured with
+--enable-injection-points.
+
+add_path() is hot, so the points are loaded once per planner invocation in
+standard_planner() and consulted through the process-local cache rather
+than looked up in shared memory on every call.
+
+No planner behavior is changed.
 ---
- src/backend/optimizer/util/pathnode.c | 39 +++++++++++++++++++++++++++
- src/include/optimizer/pathnode.h      | 12 +++++++++
- 2 files changed, 51 insertions(+)
+ src/backend/optimizer/plan/planner.c  | 12 +++++++
+ src/backend/optimizer/util/pathnode.c | 49 +++++++++++++++++++++++++++
+ src/include/optimizer/pathnode.h      | 35 +++++++++++++++++++
+ 3 files changed, 96 insertions(+)
 
+diff --git a/src/backend/optimizer/plan/planner.c b/src/backend/optimizer/plan/planner.c
+index c3c158a..74ff6b4 100644
+--- a/src/backend/optimizer/plan/planner.c
++++ b/src/backend/optimizer/plan/planner.c
+@@ -60,6 +60,7 @@
+ #include "rewrite/rewriteManip.h"
+ #include "utils/acl.h"
+ #include "utils/backend_status.h"
++#include "utils/injection_point.h"
+ #include "utils/lsyscache.h"
+ #include "utils/rel.h"
+ #include "utils/selfuncs.h"
+@@ -357,6 +358,17 @@ standard_planner(Query *parse, const char *query_string, int cursorOptions,
+ 			   *lr,
+ 			   *lc;
+ 
++	/*
++	 * Load the path-pruning injection points once per planner invocation, so
++	 * that add_path() and add_path_precheck() can consult the process-local
++	 * cache instead of looking each of them up in shared memory on every
++	 * call.
++	 */
++	INJECTION_POINT_LOAD("planner-add-path-accept");
++	INJECTION_POINT_LOAD("planner-add-path-reject");
++	INJECTION_POINT_LOAD("planner-add-path-displace");
++	INJECTION_POINT_LOAD("planner-add-path-precheck-reject");
++
+ 	/*
+ 	 * Set up global state for this planner invocation.  This data is needed
+ 	 * across all levels of sub-Query that might exist in the given command,
 diff --git a/src/backend/optimizer/util/pathnode.c b/src/backend/optimizer/util/pathnode.c
-index 2ba3176..fa66f3e 100644
+index 2ba3176..9cb7939 100644
 --- a/src/backend/optimizer/util/pathnode.c
 +++ b/src/backend/optimizer/util/pathnode.c
-@@ -25,6 +25,7 @@
- #include "optimizer/optimizer.h"
- #include "optimizer/pathnode.h"
- #include "optimizer/paths.h"
-+#include "utils/injection_point.h"
+@@ -28,6 +28,7 @@
  #include "optimizer/planmain.h"
  #include "optimizer/tlist.h"
  #include "parser/parsetree.h"
-@@ -455,12 +456,42 @@ set_cheapest(RelOptInfo *parent_rel)
-  *
-  * Returns nothing, but modifies parent_rel->pathlist.
-  */
-+
-+#ifdef USE_INJECTION_POINTS
-+/*
-+ * Report a path pruning decision to an attached injection point.
-+ *
-+ * The callback receives a PathPruningInfo describing the relation, the path
-+ * the decision was made about, and the path responsible for the decision, if
-+ * any.  Building the struct is cheap, but it is still done only in builds
-+ * configured with --enable-injection-points.
-+ */
-+static void
-+path_pruning_notify(const char *name, RelOptInfo *rel,
-+					Path *path, Path *dominator)
-+{
-+	PathPruningInfo info;
-+
-+	info.rel = rel;
-+	info.path = path;
-+	info.dominator = dominator;
-+
-+	INJECTION_POINT(name, &info);
-+}
-+
-+#define PATH_PRUNING_NOTIFY(name, rel, path, dominator) \
-+	path_pruning_notify(name, rel, path, dominator)
-+#else
-+#define PATH_PRUNING_NOTIFY(name, rel, path, dominator) ((void) 0)
-+#endif
-+
- void
- add_path(RelOptInfo *parent_rel, Path *new_path)
- {
- 	bool		accept_new = true;	/* unless we find a superior old path */
- 	int			insert_at = 0;	/* where to insert new item */
- 	List	   *new_path_pathkeys;
-+	Path	   *dominator = NULL;	/* old path that rejected new_path */
- 	ListCell   *p1;
++#include "utils/injection_point.h"
+ #include "utils/memutils.h"
+ #include "utils/selfuncs.h"
  
- 	/*
-@@ -627,6 +658,8 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
- 			/*
- 			 * Delete the data pointed-to by the deleted cell, if possible
- 			 */
-+			PATH_PRUNING_NOTIFY("path-pruning-displace", parent_rel,
-+								old_path, new_path);
- 			if (!IsA(old_path, IndexPath))
- 				pfree(old_path);
- 		}
-@@ -648,17 +681,23 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
+@@ -621,6 +622,19 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
+ 		 */
+ 		if (remove_old)
+ 		{
++#ifdef USE_INJECTION_POINTS
++			PlannerPathComparisonInjectionData inj = {
++				.parent_rel = parent_rel,
++				.new_path = new_path,
++				.old_path = old_path,
++			};
++
++			/*
++			 * Fire before the path leaves the list and before it is freed, so
++			 * that a callback always sees a live Path.
++			 */
++			INJECTION_POINT_CACHED("planner-add-path-displace", &inj);
++#endif
+ 			parent_rel->pathlist = foreach_delete_current(parent_rel->pathlist,
+ 														  p1);
+ 
+@@ -648,11 +662,32 @@ add_path(RelOptInfo *parent_rel, Path *new_path)
  		 * new_path cannot dominate any other elements of the pathlist.
  		 */
  		if (!accept_new)
 +		{
-+			dominator = old_path;
++#ifdef USE_INJECTION_POINTS
++			PlannerPathComparisonInjectionData inj = {
++				.parent_rel = parent_rel,
++				.new_path = new_path,
++				.old_path = old_path,
++			};
++
++			/* new_path is freed below, so report it while it is still live */
++			INJECTION_POINT_CACHED("planner-add-path-reject", &inj);
++#endif
  			break;
 +		}
  	}
  
  	if (accept_new)
  	{
-+		PATH_PRUNING_NOTIFY("path-pruning-accept", parent_rel, new_path, NULL);
++#ifdef USE_INJECTION_POINTS
++		PlannerPathComparisonInjectionData inj = {
++			.parent_rel = parent_rel,
++			.new_path = new_path,
++			.old_path = NULL,
++		};
++
++		INJECTION_POINT_CACHED("planner-add-path-accept", &inj);
++#endif
  		/* Accept the new path: insert it at proper place in pathlist */
  		parent_rel->pathlist =
  			list_insert_nth(parent_rel->pathlist, insert_at, new_path);
- 	}
- 	else
- 	{
-+		PATH_PRUNING_NOTIFY("path-pruning-reject", parent_rel, new_path,
-+							dominator);
- 		/* Reject and recycle the new path */
- 		if (!IsA(new_path, IndexPath))
- 			pfree(new_path);
+@@ -741,6 +776,20 @@ add_path_precheck(RelOptInfo *parent_rel, int disabled_nodes,
+ 				if (bms_equal(required_outer, PATH_REQ_OUTER(old_path)))
+ 				{
+ 					/* Found an old path that dominates the new one */
++#ifdef USE_INJECTION_POINTS
++					PlannerPathPrecheckInjectionData inj = {
++						.parent_rel = parent_rel,
++						.old_path = old_path,
++						.disabled_nodes = disabled_nodes,
++						.startup_cost = startup_cost,
++						.total_cost = total_cost,
++						.pathkeys = pathkeys,
++						.required_outer = required_outer,
++					};
++
++					INJECTION_POINT_CACHED("planner-add-path-precheck-reject",
++										   &inj);
++#endif
+ 					return false;
+ 				}
+ 			}
 diff --git a/src/include/optimizer/pathnode.h b/src/include/optimizer/pathnode.h
-index e8db321..ec7da2f 100644
+index e8db321..ff29e7d 100644
 --- a/src/include/optimizer/pathnode.h
 +++ b/src/include/optimizer/pathnode.h
-@@ -55,6 +55,18 @@ extern int	compare_path_costs(Path *path1, Path *path2,
- extern int	compare_fractional_path_costs(Path *path1, Path *path2,
- 										  double fraction);
- extern void set_cheapest(RelOptInfo *parent_rel);
+@@ -17,6 +17,41 @@
+ #include "nodes/bitmapset.h"
+ #include "nodes/pathnodes.h"
+ 
++#ifdef USE_INJECTION_POINTS
 +/*
-+ * Payload passed to the path pruning injection points.  "path" is the path
-+ * the decision was made about; "dominator" is the path that caused it to be
-+ * rejected or displaced, when one is known, and NULL otherwise.
++ * Runtime payloads for the planner path-pruning injection points.
++ *
++ * These expose planner-local objects to test and debug callbacks compiled
++ * against the same PostgreSQL sources.  They are not a stable extension API.
++ *
++ * old_path is the path responsible for the decision, when one exists: the
++ * path that dominated new_path, or the path being displaced by it.  It is
++ * NULL for the accept event.
 + */
-+typedef struct PathPruningInfo
++typedef struct PlannerPathComparisonInjectionData
 +{
-+	RelOptInfo *rel;
-+	Path	   *path;
-+	Path	   *dominator;
-+} PathPruningInfo;
++	RelOptInfo *parent_rel;
++	Path	   *new_path;
++	Path	   *old_path;
++} PlannerPathComparisonInjectionData;
 +
- extern void add_path(RelOptInfo *parent_rel, Path *new_path);
- extern bool add_path_precheck(RelOptInfo *parent_rel, int disabled_nodes,
- 							  Cost startup_cost, Cost total_cost,
++/*
++ * add_path_precheck() can reject a candidate before a Path is built, so this
++ * payload describes the proposed path by its properties rather than by a
++ * Path pointer.
++ */
++typedef struct PlannerPathPrecheckInjectionData
++{
++	RelOptInfo *parent_rel;
++	Path	   *old_path;
++	int			disabled_nodes;
++	Cost		startup_cost;
++	Cost		total_cost;
++	List	   *pathkeys;
++	Relids		required_outer;
++} PlannerPathPrecheckInjectionData;
++#endif
++
+ /* Hook for plugins to get control in build_simple_rel() */
+ typedef void (*build_simple_rel_hook_type) (PlannerInfo *root,
+ 											RelOptInfo *rel,
 -- 
 2.43.0
 

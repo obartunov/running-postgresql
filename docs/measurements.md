@@ -16,7 +16,7 @@
 | гл. 6 - connections / starvation | `experiments/ch06-connections` | прогнан |
 | гл. 7 - partition pruning / lifecycle removal | `experiments/ch07-partitions` | прогнан |
 | гл. 8 - estimates / extended statistics | `experiments/ch08-estimates` | прогнан |
-| гл. 8 - Path Probe: судьба Paths одного индекса | `experiments/ch08-path-probe` | прогнан 2026-09-08 |
+| гл. 8 - Path Probe: судьба Paths одного индекса | `experiments/ch08-path-probe` | прогнан 2026-09-08 на 16.15 и на master 20devel |
 | интермеццо после гл. 8 - upgrade window | `experiments/ch08-upgrade-window` | прогнан частично: measured post-upgrade work, не сам `pg_upgrade` |
 | гл. 11 - extensions | `experiments/ch11-extensions` | прогнан; один заявленный negative case не покрыт (PG-014) |
 | гл. 12 - semantic boundary (пересечение интервалов) | `experiments/ch12-semantic-boundary` | прогнан 2026-09-06 |

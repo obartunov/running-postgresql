@@ -115,23 +115,36 @@ total 73766.55, а затем удалён, когда появился Hash Joi
 Поэтому те же три события оформлены как injection points и собраны в
 серию для pgsql-hackers: `hackers/`.
 
-Серия собрана и прогнана на master (20devel, коммит 140fdfcd) с
-`--enable-injection-points`. На том же запросе получено 12 событий,
-сырой вывод в `demo/observed-notices.txt`. Существенные строки:
+Серия прошла три версии; текущая - v3 в `hackers/`, собрана на master
+20devel и прогнана целиком.
+
+Мотивирующий запрос (индекса в финальном плане нет), master 20devel,
+`pp_customers` 10 тыс. строк, `pp_orders` 1 млн:
 
 ```text
-NOTICE: path-pruning-reject:   rel {2} node 351 pathkeys 0 req_outer {1}
-NOTICE: path-pruning-displace: rel {1 2} node 365 pathkeys 0 req_outer {}
-NOTICE: path-pruning-reject:   rel {1 2} node 363 pathkeys 0 req_outer {}
+Hash Join  (cost=210.28..31730.39 rows=497216)
+  ->  Seq Scan on pp_orders o  (cost=0.00..28894.00 rows=1000000)
+
+event=accept   rel={2}   IndexScan index=32826 total=86426.48 required_outer={}
+event=accept   rel={2}   IndexScan index=32826 total=16.19    required_outer={1}
+event=accept   rel={1,2} NestLoop  total=56961.08
+event=displace rel={1,2} HashJoin  total=31730.39  old_type=NestLoop
 ```
 
-Вывод тот же, что дал локальный патч на 16.15: решение принято на уровне
-join, а не на уровне сканирования.
+Вывод тот же, что дал локальный патч на 16.15 на своих данных: оба
+кандидата по индексу приняты, вытеснен Nested Loop над параметризованным
+путём, а не сам путь. Полные трассы в `hackers/demo/`.
+
+Дополнительно на master стало видно то, чего не показывала первая
+инструментовка: на уровне join за один прогон лидер меняется несколько
+раз (MergeJoin, NestLoop, HashJoin, снова NestLoop, снова HashJoin).
+Без события `accept` видны только смерти, и картина выглядит короче,
+чем она есть.
 
 Найдено при сборке демонстрации: существующий callback `notice` в модуле
 `injection_points` считает аргумент строкой и на типизированном
-аргументе печатает мусор. Поэтому в 0002 добавлен отдельный callback
-`notice-path`. Это записано в cover letter как вопрос к рецензентам:
+аргументе печатает мусор. Поэтому в 0002 добавлено отдельное действие
+`path-prune-notice`. Это записано в cover letter как вопрос к рецензентам:
 либо аргументы остаются строками и мы теряем `required_outer`, либо
 принимается типизированный payload.
 

@@ -79,10 +79,21 @@ accepted  2    T_IndexScan      0.43     14.01      101   1  1
 
 ## Тот же опыт без локального патча
 
-`hackers/` содержит серию из двух патчей для pgsql-hackers: те же три
-события, оформленные как injection points, и callback для них в тестовом
-модуле. Серия собрана и прогнана на master с
-`--enable-injection-points`; сырой вывод в `demo/observed-notices.txt`.
+`hackers/` содержит серию v3 для pgsql-hackers: четыре события
+(`accept`, `reject`, `displace`, `precheck-reject`), оформленные как
+injection points, и действие `path-prune-notice` в тестовом модуле.
+
+Серия собрана на master 20devel и прогнана целиком: патчи накладываются
+на свежий клон, сборка чистая, `make check` модуля проходит, демо
+воспроизводит все три требуемых признака. Трассы в
+`hackers/demo/trace-observed.log` и
+`hackers/demo/trace-observed-join.log`.
+
+История версий: v1 - моя серия из трёх событий без `precheck-reject`;
+v2 - серия @yoda с `precheck-reject`, но без `accept`; v3 - объединение,
+плюс загрузка точек один раз за вызов планировщика и исправления,
+перечисленные в `hackers/README.md`. Ревью v2 - в
+`reviews/2026-09-08-planner-pruning-injection-v2.md`.
 
 Порядок такой: книга породила эксперимент, эксперимент потребовал
 инструмент, инструмент оформлен как минимальная observability в core.
@@ -90,11 +101,16 @@ accepted  2    T_IndexScan      0.43     14.01      101   1  1
 останется:
 
 ```text
-setup.sql
-demo/run.sql
-notice-path callback
-разбор вывода
+hackers/demo/setup.sql
+hackers/demo/demo.sql
+path-prune-notice
+hackers/demo/analyze.sh
 ```
+
+Локальный патч `0001-path-probe-instrument-add_path.patch` и
+`decode.py` остаются только как история: они работают на PostgreSQL 16 и
+не требуют `--enable-injection-points`. Для новых прогонов пользоваться
+надо серией из `hackers/`.
 
 ## Чего стенд не делает
 

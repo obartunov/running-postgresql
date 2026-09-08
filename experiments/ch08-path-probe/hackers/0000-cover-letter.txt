@@ -67,16 +67,28 @@ displaced by a cheaper Hash Join.  The index was not pruned - the join
 method above it lost.  That distinction is the whole point, and it is not
 derivable from EXPLAIN.
 
-Event counts on the first demo query, which are themselves informative:
+Event counts, first demo query:
 
-  accept          16
+  accept          10
   precheck-reject 16
   reject           3
   displace         3
 
+and the second one:
+
+  accept          14
+  precheck-reject 13
+  reject           7
+  displace         6
+
 Half of the pruning happens in add_path_precheck(), before any Path is
 built.  That is hard to learn any other way and is the reason the precheck
 boundary is included.
+
+Note that the demo attaches all four points in a single statement.
+Attaching them one at a time would mean that the planning of each
+subsequent attach statement is itself observed by the points already
+attached, and those events would land in the trace.
 
 Lifetimes
 ---------
@@ -94,11 +106,14 @@ Overhead
 --------
 
 The payload structs and their construction exist only under
-USE_INJECTION_POINTS, so ordinary builds are unchanged.
+USE_INJECTION_POINTS, so ordinary builds are unchanged.  This was checked
+rather than assumed: the series was configured and built without
+--enable-injection-points, backend and test module both, with no errors and
+no new warnings.
 
-For builds that do have injection points enabled, the four points are
-loaded once per planner invocation and consulted through the process-local
-cache, rather than looked up in shared memory on every add_path() call.
+To avoid a shared memory lookup on every add_path() call, the four points
+are loaded once per planner invocation and consulted through the
+process-local cache.
 
 I measured that choice rather than assuming it.  On a six-way join planned
 in a loop, with nothing attached, with and without the cached form:
@@ -161,8 +176,6 @@ Open questions
   * Is planner() the right place to load the points?  It is correct with
     respect to planner_hook, but it costs four cache lookups per planner
     invocation even when nothing is attached.
-  * Are four boundaries the right set, or should accept be dropped in
-    favour of a smaller series?
   * Should the names be shorter, e.g. planner-path-precheck-reject?
 
 Demo

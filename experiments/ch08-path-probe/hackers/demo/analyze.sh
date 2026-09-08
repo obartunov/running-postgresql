@@ -34,6 +34,7 @@ END {
 
     print ""
     print "== event counts =="
+    print "accept          " (count["accept"] + 0)
     print "precheck-reject " (count["precheck-reject"] + 0)
     print "reject          " (count["reject"] + 0)
     print "displace        " (count["displace"] + 0)

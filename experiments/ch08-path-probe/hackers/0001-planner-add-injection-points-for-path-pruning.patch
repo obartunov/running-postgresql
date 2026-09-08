@@ -1,6 +1,6 @@
-From 3fde0f0bc88dd5c9f1c3fc681edf6f05c7187681 Mon Sep 17 00:00:00 2001
+From 09ac309267e81388982e4f27cf04ead40405118b Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
-Date: Tue, 8 Sep 2026 16:08:55 +0000
+Date: Tue, 8 Sep 2026 17:03:03 +0000
 Subject: [PATCH 1/2] planner: add injection points for path pruning
 
 EXPLAIN shows the plan that survived planning.  It does not show which
@@ -34,12 +34,12 @@ debug instrumentation, not a stable extension API, and both the structs and
 the payload construction exist only in builds configured with
 --enable-injection-points.
 
-add_path() is called often enough that a shared memory lookup per call is
-worth avoiding, so the points are loaded once per planner invocation and
-consulted through the process-local cache.  The load is done in planner(),
-before planner_hook is consulted: doing it in standard_planner() would mean
-that a hook which replaces the planner entirely leaves the cache empty and
-the injection points silently do nothing.
+To avoid a shared memory lookup on every add_path() call, the points are
+loaded once per planner invocation and consulted through the process-local
+cache.  The load is done in planner(), before planner_hook is consulted:
+doing it in standard_planner() would mean that a hook which replaces the
+planner entirely leaves the cache empty and the injection points silently
+do nothing.
 
 No planner behavior is changed.
 ---

@@ -4,11 +4,17 @@ CREATE EXTENSION IF NOT EXISTS injection_points;
 -- cannot trigger our callback.
 SELECT injection_points_set_local();
 
-SELECT injection_points_attach('planner-add-path-accept', 'path-prune-notice');
-SELECT injection_points_attach('planner-add-path-reject', 'path-prune-notice');
-SELECT injection_points_attach('planner-add-path-displace', 'path-prune-notice');
-SELECT injection_points_attach('planner-add-path-precheck-reject',
-                               'path-prune-notice');
+-- Attach all four points in a single statement.  Attaching them one by one
+-- would mean that the planning of each subsequent attach statement is itself
+-- observed by the points already attached, and those events would end up in
+-- the trace of this demo.
+SELECT injection_points_attach(name, 'path-prune-notice')
+FROM (VALUES
+    ('planner-add-path-accept'),
+    ('planner-add-path-reject'),
+    ('planner-add-path-displace'),
+    ('planner-add-path-precheck-reject')
+) AS p(name);
 
 SET max_parallel_workers_per_gather = 0;
 

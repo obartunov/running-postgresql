@@ -1,6 +1,6 @@
-From 3f34afd5ad29d4e61f221bac8083dea4731f485f Mon Sep 17 00:00:00 2001
+From ad877668e2d51186c91f4f827887a8400c0615df Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
-Date: Tue, 8 Sep 2026 16:08:55 +0000
+Date: Tue, 8 Sep 2026 17:03:03 +0000
 Subject: [PATCH 2/2] injection_points: add planner path-prune notice action
 
 Add a test action for the planner path-pruning injection points.  It emits
@@ -14,9 +14,11 @@ garbage; this action understands the payload instead.
 
 Two details are worth noting.  Upper relations have no relids, so they are
 reported as "upper" rather than as an empty set that would look like a
-relation.  Bitmap paths are attributed to the index of their bitmap qual,
-because otherwise a displacement between two paths over the same physical
-index appears to involve no index at all.
+relation.  A bitmap heap path is attributed to the index of its bitmap
+qual, because otherwise a displacement between two paths over the same
+physical index appears to involve no index at all; only the simple
+single-index case is handled, and BitmapAnd or BitmapOr paths are reported
+as having no index.
 
 The row estimate is included because it is what most clearly separates two
 candidates over the same index: an unparameterized path over a large table
@@ -28,15 +30,16 @@ event can be observed, that a parameterized candidate is reported with a
 non-empty required_outer, and that an index path is reported with its
 index.  It deliberately does not compare the output as a whole, because the
 lines contain costs and row estimates that are not stable across platforms
-or planner changes.
+or planner changes.  It attaches the points in a single statement, so that
+the planning of the attach statements themselves is not observed.
 
 This is a test helper, not a planner reporting API.
 ---
  src/test/modules/injection_points/Makefile    |   2 +
- .../injection_points/injection_points.c       | 217 ++++++++++++++++++
+ .../injection_points/injection_points.c       | 220 ++++++++++++++++++
  src/test/modules/injection_points/meson.build |   5 +
- .../t/001_planner_path_prune.pl               |  88 +++++++
- 4 files changed, 312 insertions(+)
+ .../t/001_planner_path_prune.pl               |  95 ++++++++
+ 4 files changed, 322 insertions(+)
  create mode 100644 src/test/modules/injection_points/t/001_planner_path_prune.pl
 
 diff --git a/src/test/modules/injection_points/Makefile b/src/test/modules/injection_points/Makefile
@@ -53,7 +56,7 @@ index 3b136ad..9a2a320 100644
  
  ISOLATION = basic \
 diff --git a/src/test/modules/injection_points/injection_points.c b/src/test/modules/injection_points/injection_points.c
-index 66d8158..771b3fa 100644
+index 66d8158..e24cb5e 100644
 --- a/src/test/modules/injection_points/injection_points.c
 +++ b/src/test/modules/injection_points/injection_points.c
 @@ -20,9 +20,12 @@
@@ -79,7 +82,7 @@ index 66d8158..771b3fa 100644
  
  /* track if injection points attached in this process are linked to it */
  static bool injection_point_local = false;
-@@ -222,6 +228,215 @@ injection_notice(const char *name, const void *private_data, void *arg)
+@@ -222,6 +228,218 @@ injection_notice(const char *name, const void *private_data, void *arg)
  		elog(NOTICE, "notice triggered for injection point %s", name);
  }
  
@@ -184,10 +187,13 @@ index 66d8158..771b3fa 100644
 +}
 +
 +/*
-+ * Index behind a path, if any.  Bitmap paths are reported by the index of
-+ * the bitmap qual they are built on, because otherwise a displacement
-+ * between two paths over the same physical index looks like a displacement
-+ * involving no index at all.
++ * Index behind a path, if any.
++ *
++ * A bitmap heap path is reported by the index of its bitmap qual, because
++ * otherwise a displacement between two paths over the same physical index
++ * looks like a displacement involving no index at all.  Only the simple
++ * single-index case is handled: BitmapAnd and BitmapOr paths combine several
++ * indexes and are reported as having none.
 + */
 +static Oid
 +path_index_oid(const Path *path)
@@ -295,7 +301,7 @@ index 66d8158..771b3fa 100644
  /*
   * Error cleanup callback for injection point waits.
   */
-@@ -335,6 +550,8 @@ injection_points_attach(PG_FUNCTION_ARGS)
+@@ -335,6 +553,8 @@ injection_points_attach(PG_FUNCTION_ARGS)
  		function = "injection_notice";
  	else if (strcmp(action, "wait") == 0)
  		function = "injection_wait";
@@ -322,10 +328,10 @@ index aff516b..8ef1389 100644
        'basic',
 diff --git a/src/test/modules/injection_points/t/001_planner_path_prune.pl b/src/test/modules/injection_points/t/001_planner_path_prune.pl
 new file mode 100644
-index 0000000..74d89d8
+index 0000000..c3401b5
 --- /dev/null
 +++ b/src/test/modules/injection_points/t/001_planner_path_prune.pl
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,95 @@
 +
 +# Copyright (c) 2026, PostgreSQL Global Development Group
 +
@@ -370,9 +376,16 @@ index 0000000..74d89d8
 +# not to bless any particular cost.
 +my $query = q{
 +SELECT injection_points_set_local();
-+SELECT injection_points_attach('planner-add-path-accept', 'path-prune-notice');
-+SELECT injection_points_attach('planner-add-path-reject', 'path-prune-notice');
-+SELECT injection_points_attach('planner-add-path-displace', 'path-prune-notice');
++-- Attach in a single statement: attaching one by one would mean that the
++-- planning of each subsequent attach statement is itself observed, and the
++-- assertions below could be satisfied by those events rather than by the
++-- query under test.
++SELECT injection_points_attach(name, 'path-prune-notice')
++FROM (VALUES
++    ('planner-add-path-accept'),
++    ('planner-add-path-reject'),
++    ('planner-add-path-displace')
++) AS p(name);
 +SET max_parallel_workers_per_gather = 0;
 +SET enable_hashjoin = off;
 +SET enable_mergejoin = off;
@@ -399,8 +412,8 @@ index 0000000..74d89d8
 +# line has a different shape.
 +my $precheck = q{
 +SELECT injection_points_set_local();
-+SELECT injection_points_attach('planner-add-path-precheck-reject',
-+                               'path-prune-notice');
++SELECT injection_points_attach(name, 'path-prune-notice')
++FROM (VALUES ('planner-add-path-precheck-reject')) AS p(name);
 +SET max_parallel_workers_per_gather = 0;
 +EXPLAIN (COSTS OFF) SELECT o.id FROM ppc c JOIN ppo o ON o.customer_id = c.id
 + JOIN ppc d ON d.id = c.id;

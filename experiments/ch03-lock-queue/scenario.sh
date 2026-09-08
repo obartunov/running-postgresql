@@ -14,7 +14,7 @@ MODE="${1:?укажите режим: naive, timeout или cancel-ddl}"
 OUT="results/$MODE"; mkdir -p "$OUT"
 
 # Преflight: держатель от прерванного прогона блокирует DROP TABLE в
-# setup.sql. lock_timeout превращает вечное ожидание во внятную ошибку —
+# setup.sql. lock_timeout превращает вечное ожидание во внятную ошибку -
 # то самое правило, которое доказывает эта глава.
 psql -X -q -d "$DB" -c "
   SELECT pg_terminate_backend(pid) FROM pg_stat_activity
@@ -95,7 +95,7 @@ case "$MODE" in
     ;;
   naive)
     # Без ограничителя очередь не разойдётся сама: B ждёт A, C ждёт B.
-    # Отпускаем A — это и есть 'нашли и сняли виновника'.
+    # Отпускаем A - это и есть 'нашли и сняли виновника'.
     printf 'COMMIT;\n' >&9
     ;;
 esac

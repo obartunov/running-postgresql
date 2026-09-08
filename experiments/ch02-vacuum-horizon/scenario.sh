@@ -43,7 +43,7 @@ HINT
   exit 1
 fi 
 psql -X -d "$DB" -f measure.sql > "$OUT/00-before.txt"
-# Файлы накапливаются построчно по раундам — обнуляем, иначе прогоны
+# Файлы накапливаются построчно по раундам - обнуляем, иначе прогоны
 # склеиваются и таблица размеров врёт.
 : > "$OUT/size.txt"; : > "$OUT/horizon.txt"
 
@@ -87,7 +87,7 @@ for i in $(seq 1 "$ROUNDS"); do
   psql -X -d "$DB" -c "VACUUM (VERBOSE) orders" > "$OUT/vacuum-$i.txt" 2>&1
   psql -X -d "$DB" -f measure.sql   >> "$OUT/size.txt"
   psql -X -d "$DB" -f horizon.sql   >> "$OUT/horizon.txt"
-  # Именно строка tuples:, а не pages: — нас интересуют версии строк,
+  # Именно строка tuples:, а не pages: - нас интересуют версии строк,
   # а не страницы. Формулировки различаются между версиями сервера,
   # поэтому берём обе, если нашлись.
   echo "round $i: $(grep -oE 'tuples: .*' "$OUT/vacuum-$i.txt" | head -1)"

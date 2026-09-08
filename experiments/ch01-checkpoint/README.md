@@ -5,7 +5,7 @@
 ## Что доказывает
 
 Что при одной и той же нагрузке частые чекпойнты генерируют кратно
-больше WAL, и что почти вся разница — full-page images, а не запись
+больше WAL, и что почти вся разница - full-page images, а не запись
 данных.
 
 ## Порядок
@@ -36,15 +36,15 @@ grep checkpoint /path/to/postgresql.log > results/A/checkpoints.log
 
 Три числа на прогон:
 
-1. **WAL на транзакцию** — `pg_wal_lsn_diff` между `before.txt` и
+1. **WAL на транзакцию** - `pg_wal_lsn_diff` между `before.txt` и
    `after.txt`, делённое на прирост `xacts`.
-2. **Доля чекпойнтов по объёму** — прирост `num_requested` против
+2. **Доля чекпойнтов по объёму** - прирост `num_requested` против
    прироста `num_timed`.
-3. **Амплификация задержки** — p99/p50 из stderr `analyze.py`.
+3. **Амплификация задержки** - p99/p50 из stderr `analyze.py`.
 
 Наложите `p99_by_window.tsv` на моменты `checkpoint starting` из
 `checkpoints.log`. Зубец должен садиться на начало окна (FPI) или на
-конец (фаза sync) — это разные диагнозы.
+конец (фаза sync) - это разные диагнозы.
 
 ## Прогон C
 

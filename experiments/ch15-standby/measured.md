@@ -37,7 +37,7 @@ pg_stat_replication.backend_xmin  = NULL
 pg_replication_slots.xmin         = 757     (slot standby1, active = t)
 ```
 
-`removable cutoff` в выводе `VACUUM` того же прогона — 757.
+`removable cutoff` в выводе `VACUUM` того же прогона - 757.
 
 ## Derived
 

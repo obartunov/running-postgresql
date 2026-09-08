@@ -18,5 +18,5 @@ grep -cE '^\s*->?\s*(Sort|Hash|HashAggregate|HashJoin|Memoize|GroupAggregate)' \
 grep -E 'Sort Method|Buckets:|Batches:|Disk:|Memory Usage|Workers Launched' \
   "results/explain-$WM.txt" || true
 echo
-echo "Batches > 1 или 'external merge' — узел не поместился и сбросился"
+echo "Batches > 1 или 'external merge' - узел не поместился и сбросился"
 echo "на диск. Это предохранитель сработал, а не поломка."

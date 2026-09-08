@@ -8,7 +8,7 @@ Question:     насколько расходятся оценка и факт �
               и за краем гистограммы
 Result:       за краем гистограммы оценка занижена в 65 раз;
               расширенная статистика вида dependencies выправляет
-              оценку связанных колонок, mcv — нет
+              оценку связанных колонок, mcv - нет
 Scripts:      run.sh, setup.sql, correlated.sql, add-stats.sql, histogram-edge.sql
 Raw output:   results/correlated-before.txt, results/correlated-after.txt,
               results/histogram-edge.txt
@@ -22,11 +22,11 @@ Raw output:   results/correlated-before.txt, results/correlated-after.txt,
 ### Observed
 
 Узел по `customers` в плане запроса с условием
-`city = 'city-37' AND region = 'region-1'` (факт — 1000 строк):
+`city = 'city-37' AND region = 'region-1'` (факт - 1000 строк):
 
 | статистика | оценка |
 |---|---|
-| без расширенной | 50–51 |
+| без расширенной | 50-51 |
 | `dependencies` | 994 |
 | `mcv` | 51 |
 | `dependencies, mcv` | 52 в одном прогоне, 1093 в другом |
@@ -43,7 +43,7 @@ Raw output:   results/correlated-before.txt, results/correlated-after.txt,
 
 Занижение без расширенной статистики: 1000 / 50 = 20×.
 С `dependencies` расхождение уходит до долей процента.
-Разница во времени между прогонами — 8 %, что на этих объёмах в
+Разница во времени между прогонами - 8 %, что на этих объёмах в
 пределах шума одного запуска (повторов не делалось).
 
 ### Interpretation
@@ -54,17 +54,17 @@ Raw output:   results/correlated-before.txt, results/correlated-after.txt,
 
 Наблюдение о неустойчивости варианта `(dependencies, mcv)`:
 многоколоночный список частых значений ограничен целью статистики
-(100 комбинаций по умолчанию), а пар «город–регион» здесь 400 и все
+(100 комбинаций по умолчанию), а пар "город-регион" здесь 400 и все
 примерно равной частоты, поэтому попадание нужной пары в список
 зависит от выборки. Это объяснение согласуется с наблюдениями, но
-отдельно не проверялось — см. `docs/provenance-gaps.md`.
+отдельно не проверялось - см. `docs/provenance-gaps.md`.
 
 ## Часть 2. Край гистограммы
 
 ### Observed
 
 Таблица `events`, статистика собрана, затем добавлен 1 млн
-«сегодняшних» строк без `ANALYZE`:
+"сегодняшних" строк без `ANALYZE`:
 
 | запрос | оценка | факт |
 |---|---|---|
@@ -74,7 +74,7 @@ Raw output:   results/correlated-before.txt, results/correlated-after.txt,
 
 ### Derived
 
-Внутри диапазона расхождение 3.9 %. За краем — занижение в **65 раз**.
+Внутри диапазона расхождение 3.9 %. За краем - занижение в **65 раз**.
 
 ### Interpretation
 

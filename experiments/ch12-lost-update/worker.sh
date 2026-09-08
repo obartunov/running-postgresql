@@ -18,7 +18,7 @@ COMMIT;
 SQL
     done ;;
 
-  # 2. То же, но с optimistic locking по колонке version —
+  # 2. То же, но с optimistic locking по колонке version -
   #    так делает ORM, когда ему объяснили.
   optimistic)
     for _ in $(seq 1 "$ITER"); do

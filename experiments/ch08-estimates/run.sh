@@ -25,7 +25,7 @@ psql -X -d "$DB" -f histogram-edge.sql | tee results/histogram-edge.txt \
 cat <<'TXT'
 
 Сравнивать надо rows= (ожидание) с actual rows= (факт) в узле по
-customers, а не Execution Time. Время — следствие; предмет главы —
+customers, а не Execution Time. Время - следствие; предмет главы -
 расхождение оценки.
 
 В части 2 план за 'сегодня' построен на оценке, полученной за краем

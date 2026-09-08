@@ -11,7 +11,7 @@ echo "=========== СЦЕНА 1: последовательности остал�
 $P -c "SELECT last_value AS pub_seq FROM orders_id_seq"
 $S -c "SELECT last_value AS sub_seq FROM orders_id_seq"
 $S -c "SELECT max(id) AS max_id_on_subscriber FROM orders"
-echo "Строки приехали, счётчик последовательности — нет."
+echo "Строки приехали, счётчик последовательности - нет."
 
 echo
 echo "=========== СЦЕНА 4: таблица без первичного ключа ==========="
@@ -19,7 +19,7 @@ echo "--- INSERT доезжает ---"
 $P -q -c "INSERT INTO nokey VALUES (99999, 'x')"; sleep 2
 $S -c "SELECT count(*) AS nokey_rows FROM nokey"
 echo "--- UPDATE падает на публикаторе ---"
-# psql возвращает ненулевой код на ожидаемой ошибке — это часть
+# psql возвращает ненулевой код на ожидаемой ошибке - это часть
 # демонстрации, а не сбой стенда.
 $P -c "UPDATE nokey SET payload = 'y' WHERE id = 99999" 2>&1 | head -3 || true
 

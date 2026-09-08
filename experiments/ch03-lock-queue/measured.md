@@ -12,9 +12,9 @@ Scripts:      scenario.sh, blocked.sql, locks.sql, setup.sql
 Raw output:   results/naive, results/timeout, results/cancel-ddl
 ```
 
-Три сессии: A — открытая транзакция с `SELECT` (держит `ACCESS SHARE`,
-пауза на клиенте, состояние `idle in transaction`); B — `ALTER TABLE
-... ADD COLUMN ... DEFAULT '' NOT NULL`; C — обычный `SELECT count(*)`.
+Три сессии: A - открытая транзакция с `SELECT` (держит `ACCESS SHARE`,
+пауза на клиенте, состояние `idle in transaction`); B - `ALTER TABLE
+... ADD COLUMN ... DEFAULT '' NOT NULL`; C - обычный `SELECT count(*)`.
 
 ## Observed
 

@@ -1,10 +1,12 @@
-From 6caf4aa14403858cf1548ccb5d111cc217fe8d70 Mon Sep 17 00:00:00 2001
+From 2ec6463c9f9c122af3e3f5bb8eebfeb9acbe1d7c Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
 Date: Tue, 8 Sep 2026 15:23:05 +0000
 Subject: [PATCH 2/2] injection_points: add planner path-prune notice action
 
 Add a test action for the planner path-pruning injection points.  It emits
-one NOTICE line per event using simple key=value fields.
+one NOTICE line per event using simple key=value fields: path type, index
+oid where one applies, costs, row estimate, pathkeys and required_outer for
+both the new path and the one responsible for the decision.
 
 The existing "notice" action treats the injection point argument as a
 string, so attaching it to a point that passes a typed payload prints
@@ -16,13 +18,18 @@ relation.  Bitmap paths are attributed to the index of their bitmap qual,
 because otherwise a displacement between two paths over the same physical
 index appears to involve no index at all.
 
+The row estimate is included because it is what most clearly separates two
+candidates over the same index: an unparameterized path over a large table
+and a parameterized one differ by orders of magnitude in rows while sharing
+the same index oid.
+
 This is a test helper, not a planner reporting API.
 ---
- .../injection_points/injection_points.c       | 210 ++++++++++++++++++
- 1 file changed, 210 insertions(+)
+ .../injection_points/injection_points.c       | 217 ++++++++++++++++++
+ 1 file changed, 217 insertions(+)
 
 diff --git a/src/test/modules/injection_points/injection_points.c b/src/test/modules/injection_points/injection_points.c
-index 66d8158..d6a8c91 100644
+index 66d8158..9e3fcfc 100644
 --- a/src/test/modules/injection_points/injection_points.c
 +++ b/src/test/modules/injection_points/injection_points.c
 @@ -21,7 +21,10 @@
@@ -46,7 +53,7 @@ index 66d8158..d6a8c91 100644
  
  /* track if injection points attached in this process are linked to it */
  static bool injection_point_local = false;
-@@ -222,6 +228,208 @@ injection_notice(const char *name, const void *private_data, void *arg)
+@@ -222,6 +228,215 @@ injection_notice(const char *name, const void *private_data, void *arg)
  		elog(NOTICE, "notice triggered for injection point %s", name);
  }
  
@@ -201,13 +208,15 @@ index 66d8158..d6a8c91 100644
 +			 "PLANNER_PATH event=precheck-reject rel=%s "
 +			 "startup=%.2f total=%.2f disabled=%d pathkeys=%d "
 +			 "required_outer=%s "
-+			 "old_type=%s old_index=%u old_startup=%.2f old_total=%.2f",
++			 "old_type=%s old_index=%u old_startup=%.2f old_total=%.2f "
++			 "old_rows=%.0f",
 +			 rel, data->startup_cost, data->total_cost,
 +			 data->disabled_nodes, list_length(data->pathkeys),
 +			 required_outer,
 +			 path_type_name(data->old_path),
 +			 path_index_oid(data->old_path),
-+			 data->old_path->startup_cost, data->old_path->total_cost);
++			 data->old_path->startup_cost, data->old_path->total_cost,
++			 data->old_path->rows);
 +		pfree(rel);
 +		pfree(required_outer);
 +	}
@@ -234,13 +243,18 @@ index 66d8158..d6a8c91 100644
 +		elog(NOTICE,
 +			 "PLANNER_PATH event=%s rel=%s "
 +			 "new_type=%s new_index=%u new_startup=%.2f new_total=%.2f "
-+			 "new_pathkeys=%d new_required_outer=%s "
-+			 "old_type=%s old_index=%u old_required_outer=%s",
++			 "new_rows=%.0f new_pathkeys=%d new_required_outer=%s "
++			 "old_type=%s old_index=%u old_startup=%.2f old_total=%.2f "
++			 "old_rows=%.0f old_required_outer=%s",
 +			 event, rel,
 +			 path_type_name(data->new_path), path_index_oid(data->new_path),
 +			 data->new_path->startup_cost, data->new_path->total_cost,
++			 data->new_path->rows,
 +			 list_length(data->new_path->pathkeys), new_outer,
 +			 path_type_name(data->old_path), path_index_oid(data->old_path),
++			 data->old_path ? data->old_path->startup_cost : 0.0,
++			 data->old_path ? data->old_path->total_cost : 0.0,
++			 data->old_path ? data->old_path->rows : 0.0,
 +			 old_outer);
 +
 +		pfree(rel);
@@ -255,7 +269,7 @@ index 66d8158..d6a8c91 100644
  /*
   * Error cleanup callback for injection point waits.
   */
-@@ -335,6 +543,8 @@ injection_points_attach(PG_FUNCTION_ARGS)
+@@ -335,6 +550,8 @@ injection_points_attach(PG_FUNCTION_ARGS)
  		function = "injection_notice";
  	else if (strcmp(action, "wait") == 0)
  		function = "injection_wait";

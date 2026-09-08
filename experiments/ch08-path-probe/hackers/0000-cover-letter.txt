@@ -53,14 +53,15 @@ relation, and an index that does not appear in the final plan at all.
 The trace for that query, abridged:
 
   event=accept   rel={2}   new_type=IndexScan new_index=32826
-                 new_total=86426.48 new_required_outer={}
+                 new_total=86426.48 new_rows=1000000 new_required_outer={}
   event=accept   rel={2}   new_type=IndexScan new_index=32826
-                 new_total=16.19    new_required_outer={1}
+                 new_total=16.19    new_rows=99      new_required_outer={1}
   event=accept   rel={1,2} new_type=NestLoop  new_total=56961.08
   event=displace rel={1,2} new_type=HashJoin  new_total=31730.39
                  old_type=NestLoop
 
-Both candidates over that index are accepted, including the parameterized
+The row estimates make the point on their own: 1000000 against 99 over the
+same index oid.  Both candidates are accepted, including the parameterized
 one; the Nested Loop built on top of it is accepted as well and is then
 displaced by a cheaper Hash Join.  The index was not pruned - the join
 method above it lost.  That distinction is the whole point, and it is not

@@ -128,6 +128,13 @@ A successful advice does not show that the corresponding path survived the
 unconstrained run, because advice itself changes the search.  The two are
 complementary, and neither substitutes for the other.
 
+Style
+-----
+
+pgindent (with pg_bsd_indent built from src/tools) makes no changes to the
+four touched files; the TAP test is pgperltidy-clean; the two new typedefs
+are added to typedefs.list.
+
 Testing
 -------
 

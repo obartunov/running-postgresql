@@ -1,6 +1,6 @@
-From 4339cc4e5a593f3770a825a85c8769850fcf9f13 Mon Sep 17 00:00:00 2001
+From 3f34afd5ad29d4e61f221bac8083dea4731f485f Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
-Date: Tue, 8 Sep 2026 15:56:13 +0000
+Date: Tue, 8 Sep 2026 16:08:55 +0000
 Subject: [PATCH 2/2] injection_points: add planner path-prune notice action
 
 Add a test action for the planner path-pruning injection points.  It emits
@@ -35,8 +35,8 @@ This is a test helper, not a planner reporting API.
  src/test/modules/injection_points/Makefile    |   2 +
  .../injection_points/injection_points.c       | 217 ++++++++++++++++++
  src/test/modules/injection_points/meson.build |   5 +
- .../t/001_planner_path_prune.pl               |  82 +++++++
- 4 files changed, 306 insertions(+)
+ .../t/001_planner_path_prune.pl               |  88 +++++++
+ 4 files changed, 312 insertions(+)
  create mode 100644 src/test/modules/injection_points/t/001_planner_path_prune.pl
 
 diff --git a/src/test/modules/injection_points/Makefile b/src/test/modules/injection_points/Makefile
@@ -53,20 +53,22 @@ index 3b136ad..9a2a320 100644
  
  ISOLATION = basic \
 diff --git a/src/test/modules/injection_points/injection_points.c b/src/test/modules/injection_points/injection_points.c
-index 66d8158..9e3fcfc 100644
+index 66d8158..771b3fa 100644
 --- a/src/test/modules/injection_points/injection_points.c
 +++ b/src/test/modules/injection_points/injection_points.c
-@@ -21,7 +21,10 @@
+@@ -20,9 +20,12 @@
+ #include "fmgr.h"
  #include "funcapi.h"
  #include "injection_points.h"
- #include "miscadmin.h"
 +#include "lib/stringinfo.h"
+ #include "miscadmin.h"
 +#include "nodes/pathnodes.h"
  #include "nodes/pg_list.h"
-+#include "optimizer/pathnode.h"
  #include "nodes/value.h"
++#include "optimizer/pathnode.h"
  #include "storage/dsm_registry.h"
  #include "storage/ipc.h"
+ #include "storage/lwlock.h"
 @@ -81,6 +84,9 @@ extern PGDLLEXPORT void injection_notice(const char *name,
  extern PGDLLEXPORT void injection_wait(const char *name,
  									   const void *private_data,
@@ -320,10 +322,11 @@ index aff516b..8ef1389 100644
        'basic',
 diff --git a/src/test/modules/injection_points/t/001_planner_path_prune.pl b/src/test/modules/injection_points/t/001_planner_path_prune.pl
 new file mode 100644
-index 0000000..8b8345d
+index 0000000..74d89d8
 --- /dev/null
 +++ b/src/test/modules/injection_points/t/001_planner_path_prune.pl
-@@ -0,0 +1,82 @@
+@@ -0,0 +1,88 @@
++
 +# Copyright (c) 2026, PostgreSQL Global Development Group
 +
 +# Structural test for the planner path-pruning injection points.
@@ -380,13 +383,16 @@ index 0000000..8b8345d
 +my ($result, $stdout, $stderr) = $node->psql('postgres', $query);
 +is($result, 0, 'query with path pruning points attached succeeds');
 +
-+like($stderr, qr/PLANNER_PATH event=accept/,
-+	'an accepted path is reported');
-+like($stderr, qr/PLANNER_PATH event=(reject|displace)/,
++like($stderr, qr/PLANNER_PATH event=accept/, 'an accepted path is reported');
++like(
++	$stderr,
++	qr/PLANNER_PATH event=(reject|displace)/,
 +	'a pruned path is reported');
 +like($stderr, qr/new_required_outer=\{\d+/,
 +	'a parameterized candidate is reported with a non-empty required_outer');
-+like($stderr, qr/new_type=IndexScan new_index=[1-9]\d*/,
++like(
++	$stderr,
++	qr/new_type=IndexScan new_index=[1-9]\d*/,
 +	'an index path is reported with its index');
 +
 +# The precheck boundary reports a candidate that has no Path yet, so its
@@ -401,7 +407,9 @@ index 0000000..8b8345d
 +};
 +my ($r2, $out2, $err2) = $node->psql('postgres', $precheck);
 +is($r2, 0, 'query with the precheck point attached succeeds');
-+like($err2, qr/PLANNER_PATH event=precheck-reject/,
++like(
++	$err2,
++	qr/PLANNER_PATH event=precheck-reject/,
 +	'a precheck rejection is reported');
 +
 +$node->stop;

@@ -1,6 +1,6 @@
-From d970a1395d116df32eb27dba3a19597373b6b888 Mon Sep 17 00:00:00 2001
+From 3fde0f0bc88dd5c9f1c3fc681edf6f05c7187681 Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
-Date: Tue, 8 Sep 2026 15:56:13 +0000
+Date: Tue, 8 Sep 2026 16:08:55 +0000
 Subject: [PATCH 1/2] planner: add injection points for path pruning
 
 EXPLAIN shows the plan that survived planning.  It does not show which
@@ -46,7 +46,8 @@ No planner behavior is changed.
  src/backend/optimizer/plan/planner.c  | 16 +++++++++
  src/backend/optimizer/util/pathnode.c | 49 +++++++++++++++++++++++++++
  src/include/optimizer/pathnode.h      | 35 +++++++++++++++++++
- 3 files changed, 100 insertions(+)
+ src/tools/pgindent/typedefs.list      |  2 ++
+ 4 files changed, 102 insertions(+)
 
 diff --git a/src/backend/optimizer/plan/planner.c b/src/backend/optimizer/plan/planner.c
 index c3c158a..128de94 100644
@@ -214,6 +215,19 @@ index e8db321..ff29e7d 100644
  /* Hook for plugins to get control in build_simple_rel() */
  typedef void (*build_simple_rel_hook_type) (PlannerInfo *root,
  											RelOptInfo *rel,
+diff --git a/src/tools/pgindent/typedefs.list b/src/tools/pgindent/typedefs.list
+index 1040a65..bed53a7 100644
+--- a/src/tools/pgindent/typedefs.list
++++ b/src/tools/pgindent/typedefs.list
+@@ -2372,6 +2372,8 @@ PlannedStmtOrigin
+ PlannerGlobal
+ PlannerInfo
+ PlannerParamItem
++PlannerPathComparisonInjectionData
++PlannerPathPrecheckInjectionData
+ Point
+ Pointer
+ PolicyInfo
 -- 
 2.43.0
 

@@ -1,77 +1,79 @@
 #!/usr/bin/env python3
-"""Backlog: расписание против факта.
+"""Темп поступления, темп завершения и backlog по секундам.
 
-  backlog.py <префикс лога pgbench> <sampler.tsv> <лог сервера> [окно, с]
+  backlog.py <каталог прогона> [окно, с]
 
-pgbench с -R записывает для каждой транзакции schedule lag: на сколько
-она стартовала позже, чем должна была по расписанию. Это и есть прямая
-мера накопленной очереди: если система успевает, lag около нуля; если
-не успевает, он растёт и потом рассасывается.
+pgbench с -R пишет в сырой лог для каждой транзакции задержку от
+ЗАПЛАНИРОВАННОГО момента (schedule lag включён в latency при -R).
+Отсюда:
 
-Формат сырого лога pgbench при -R:
-  client_id transaction_no time script_no time_epoch time_us schedule_lag
+  arrivals(t)    — сколько транзакций должно было стартовать в окне
+  completions(t) — сколько фактически завершилось в окне
+  backlog(t)     — накопленная разница, то есть длина очереди
+
+Отдельно печатается schedule lag: если он растёт, система не
+успевает за расписанием, и это тот самый долг, а не просто медленный
+запрос.
 """
-import sys, glob, re, statistics, datetime
+import sys, glob, os, statistics
 from collections import defaultdict
 
-prefix, sampler, server_log = sys.argv[1], sys.argv[2], sys.argv[3]
-W = int(sys.argv[4]) if len(sys.argv) > 4 else 5
+d = sys.argv[1]
+W = int(sys.argv[2]) if len(sys.argv) > 2 else 1
 
-lat, lag, cnt = defaultdict(list), defaultdict(list), defaultdict(int)
-for path in sorted(glob.glob(prefix + "*")):
+comp = defaultdict(int)
+lat = defaultdict(list)
+lag = defaultdict(list)   # schedule lag: 7-е поле, появляется при -R
+for path in sorted(glob.glob(os.path.join(d, "pg.*"))):
+    if path.endswith((".out", ".tsv", ".txt", ".log")):
+        continue
     for line in open(path):
         f = line.split()
-        if len(f) < 7:
+        if len(f) < 6:
             continue
         try:
-            e = int(f[4]) // W * W
-            lat[e].append(float(f[2]) / 1000.0)
-            lag[e].append(float(f[6]) / 1000.0)
-            cnt[e] += 1
+            l_ms, epoch = float(f[2]) / 1000.0, int(f[4])
         except ValueError:
             continue
-if not cnt:
-    sys.exit("нет данных pgbench с schedule lag (нужен прогон с -R и -l)")
+        b = epoch - epoch % W
+        comp[b] += 1
+        lat[b].append(l_ms)
+        if len(f) >= 7:
+            try:
+                lag[b].append(float(f[6]) / 1000.0)
+            except ValueError:
+                pass
+if not comp:
+    sys.exit("нет сырого лога pgbench в " + d)
 
-ckpt = []
-pat = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ \w+ .*checkpoint (starting|complete)")
-for line in open(server_log, errors="replace"):
-    m = pat.match(line)
-    if m:
-        t = datetime.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
-        ckpt.append((int(t.replace(tzinfo=datetime.timezone.utc).timestamp()),
-                     m.group(2)))
+start, end = min(comp), max(comp)
+total = sum(comp.values())
+rate = total / max(1, (end - start + W))
 
-buf = {}
-for line in open(sampler):
-    f = line.split("\t")
-    if len(f) < 8 or not f[0].isdigit():
-        continue
-    e = int(f[0]) // W * W
-    d = buf.setdefault(e, [0, 0, 0])
-    d[0] += int(f[1]); d[1] += int(f[5]); d[2] += int(f[6])
+has_lag = bool(lag)
+print("t,c\tзавершено\tp50_ms\tp99_ms\tlag_p50_ms\tlag_max_ms")
+for e in range(start, end + 1, W):
+    done = comp.get(e, 0)
+    xs = sorted(lat.get(e) or [0.0])
+    p99 = xs[min(len(xs) - 1, int(round(0.99 * (len(xs) - 1))))]
+    ls = sorted(lag.get(e) or [0.0])
+    lp50 = statistics.median(ls)
+    print(f"{e-start}\t{done}\t{statistics.median(xs):.2f}\t{p99:.2f}\t"
+          f"{lp50:.2f}\t{max(ls):.2f}")
 
-def pct(xs, p):
-    xs = sorted(xs)
-    return xs[min(len(xs) - 1, int(round(p * (len(xs) - 1))))]
-
-start = min(cnt)
-marks = {e // W * W: k for e, k in ckpt if start <= e <= max(cnt)}
-print("t,c\tзавершено\tp99_ms\tlag_p99_ms\tlag_max_ms\tbuf_ckpt\tметка")
-for e in sorted(cnt):
-    b = buf.get(e, [0, 0, 0])
-    print(f"{e-start}\t{cnt[e]}\t{pct(lat[e],0.99):.1f}\t"
-          f"{pct(lag[e],0.99):.1f}\t{max(lag[e]):.1f}\t{b[1]}\t"
-          f"{marks.get(e,'')}")
-
-quiet = [max(lag[e]) for e in cnt if e not in marks]
-if quiet:
-    base = statistics.median(quiet)
-    print(f"\n# фоновый максимум schedule lag: {base:.1f} ms", file=sys.stderr)
-    for e in sorted(cnt):
-        if max(lag[e]) > 5 * base:
-            prev = [c for c in sorted(marks) if c <= e]
-            off = f"+{e-prev[-1]}s от {marks[prev[-1]]}" if prev else "до чекпойнта"
-            print(f"# t={e-start}s: lag_max {max(lag[e]):.0f} ms, "
-                  f"завершено {cnt[e]}, буферов чекпойнта {buf.get(e,[0,0,0])[1]}, {off}",
+print(f"\n# средний темп завершения: {rate:.1f}/s", file=sys.stderr)
+if has_lag:
+    allrows = [(e, max(lag.get(e) or [0.0])) for e in range(start, end + 1, W)]
+    base = statistics.median([v for _, v in allrows])
+    print(f"# schedule lag (задержка от расписания -R): медиана максимума по "
+          f"окнам {base:.2f} ms", file=sys.stderr)
+    for e, v in allrows:
+        if v > 10 * max(base, 0.1):
+            print(f"#   t={e-start}s: lag до {v:.1f} ms ({v/max(base,0.1):.0f}x)",
                   file=sys.stderr)
+    print("# Backlog здесь — это lag: растущий lag означает, что заявки "
+          "ждут своего\n#   расписания, то есть очередь. Постоянный lag "
+          "означает, что очереди нет.", file=sys.stderr)
+else:
+    print("# в логе нет поля schedule lag: прогон был без -R, backlog "
+          "не определён", file=sys.stderr)

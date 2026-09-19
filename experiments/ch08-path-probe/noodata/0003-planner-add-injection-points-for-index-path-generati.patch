@@ -1,0 +1,204 @@
+From b9c5d584e3729b9fc46c70f0330cc607e1ff49d1 Mon Sep 17 00:00:00 2001
+From: r2d2 <r2d2@localhost>
+Date: Sat, 19 Sep 2026 14:13:02 +0400
+Subject: [PATCH] planner: add injection points for index path generation
+
+add_path() only sees candidates that were built.  When an index does not
+appear in a plan, the add_path() points cannot tell whether a path over it
+was built and lost, or never built at all.
+
+For query planning every IndexPath is built in build_index_paths(), which
+decides whether to build one from four inputs: index clauses, useful scan
+order (forward, and backward in step 5), a useful predicate, and whether an
+index-only scan is possible.  This adds two points at the end of that
+function:
+
+  planner-index-path-generated
+  planner-index-path-not-generated
+
+The payload carries the decision inputs, so "not generated" comes with its
+reason rather than being inferred from a missing path.  It also carries the
+parameterization and whether only bitmap scans were requested, since the
+function is called separately for plain, parameterized, bitmap-only and
+OR-arm cases.
+
+The early returns of build_index_paths() (scan type not supported,
+amoptionalkey index without a leading-column clause) are not reported, nor
+are indexes skipped before the call (unproven partial index predicate, OR
+arms with no matching clause).  Those indexes produce no event, which a
+consumer must read as "not examined", not as "not generated".
+
+Payload and point calls exist only under USE_INJECTION_POINTS; the points
+are loaded in planner() together with the add_path() ones.
+
+No planner behavior is changed.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_019DDxuj8Fig689TNfpRbdph
+---
+ src/backend/optimizer/path/indxpath.c | 41 +++++++++++++++++++++++++++
+ src/backend/optimizer/plan/planner.c  | 10 ++++---
+ src/include/optimizer/paths.h         | 26 +++++++++++++++++
+ src/tools/pgindent/typedefs.list      |  1 +
+ 4 files changed, 74 insertions(+), 4 deletions(-)
+
+diff --git a/src/backend/optimizer/path/indxpath.c b/src/backend/optimizer/path/indxpath.c
+index 3f5d4fa..032d28b 100644
+--- a/src/backend/optimizer/path/indxpath.c
++++ b/src/backend/optimizer/path/indxpath.c
+@@ -33,6 +33,7 @@
+ #include "optimizer/placeholder.h"
+ #include "optimizer/prep.h"
+ #include "optimizer/restrictinfo.h"
++#include "utils/injection_point.h"
+ #include "utils/lsyscache.h"
+ #include "utils/selfuncs.h"
+ 
+@@ -825,6 +826,10 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
+ 	bool		index_is_ordered;
+ 	bool		index_only_scan;
+ 	int			indexcol;
++#ifdef USE_INJECTION_POINTS
++	bool		forward_pathkeys_useful;
++	bool		backward_pathkeys_useful = false;
++#endif
+ 
+ 	Assert(skip_nonnative_saop != NULL || scantype == ST_BITMAPSCAN);
+ 
+@@ -956,6 +961,11 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
+ 	index_only_scan = (scantype != ST_BITMAPSCAN &&
+ 					   check_index_only(rel, index));
+ 
++#ifdef USE_INJECTION_POINTS
++	/* step 5 reuses useful_pathkeys, so remember the forward answer */
++	forward_pathkeys_useful = (useful_pathkeys != NIL);
++#endif
++
+ 	/*
+ 	 * 4. Generate an indexscan path if there are relevant restriction clauses
+ 	 * in the current clauses, OR the index ordering is potentially useful for
+@@ -1016,6 +1026,9 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
+ 											  BackwardScanDirection);
+ 		useful_pathkeys = truncate_useless_pathkeys(root, rel,
+ 													index_pathkeys);
++#ifdef USE_INJECTION_POINTS
++		backward_pathkeys_useful = (useful_pathkeys != NIL);
++#endif
+ 		if (useful_pathkeys != NIL)
+ 		{
+ 			ipath = create_index_path(root, index,
+@@ -1058,6 +1071,34 @@ build_index_paths(PlannerInfo *root, RelOptInfo *rel,
+ 		}
+ 	}
+ 
++#ifdef USE_INJECTION_POINTS
++	{
++		PlannerIndexPathInjectionData inj = {
++			.rel = rel,
++			.index = index,
++			.required_outer = outer_relids,
++			.bitmap_only = (scantype == ST_BITMAPSCAN),
++			.has_index_clauses = (index_clauses != NIL),
++			.has_useful_pathkeys = forward_pathkeys_useful,
++			.has_useful_backward_pathkeys = backward_pathkeys_useful,
++			.useful_predicate = useful_predicate,
++			.index_only_scan = index_only_scan,
++			.npaths = list_length(result),
++		};
++
++		/*
++		 * Report the decision together with its inputs.  The early returns
++		 * above (unsupported scan type, amoptionalkey without a
++		 * leading-column clause) are not reported: they reject the index
++		 * before its clauses and ordering have been examined.
++		 */
++		if (result != NIL)
++			INJECTION_POINT_CACHED("planner-index-path-generated", &inj);
++		else
++			INJECTION_POINT_CACHED("planner-index-path-not-generated", &inj);
++	}
++#endif
++
+ 	return result;
+ }
+ 
+diff --git a/src/backend/optimizer/plan/planner.c b/src/backend/optimizer/plan/planner.c
+index 18585bb..decd61a 100644
+--- a/src/backend/optimizer/plan/planner.c
++++ b/src/backend/optimizer/plan/planner.c
+@@ -342,10 +342,10 @@ planner(Query *parse, const char *query_string, int cursorOptions,
+ 	PlannedStmt *result;
+ 
+ 	/*
+-	 * Load the path-pruning injection points once per planner invocation, so
+-	 * that add_path() and add_path_precheck() can consult the process-local
+-	 * cache instead of looking each of them up in shared memory on every
+-	 * call.
++	 * Load the path-pruning and index-path injection points once per planner
++	 * invocation, so that add_path(), add_path_precheck() and
++	 * build_index_paths() can consult the process-local cache instead of
++	 * looking each of them up in shared memory on every call.
+ 	 *
+ 	 * This has to happen before planner_hook is consulted: a hook that does
+ 	 * not call standard_planner() would otherwise leave the cache empty, and
+@@ -355,6 +355,8 @@ planner(Query *parse, const char *query_string, int cursorOptions,
+ 	INJECTION_POINT_LOAD("planner-add-path-reject");
+ 	INJECTION_POINT_LOAD("planner-add-path-displace");
+ 	INJECTION_POINT_LOAD("planner-add-path-precheck-reject");
++	INJECTION_POINT_LOAD("planner-index-path-generated");
++	INJECTION_POINT_LOAD("planner-index-path-not-generated");
+ 
+ 	if (planner_hook)
+ 		result = (*planner_hook) (parse, query_string, cursorOptions,
+diff --git a/src/include/optimizer/paths.h b/src/include/optimizer/paths.h
+index d3853d1..06fb3e3 100644
+--- a/src/include/optimizer/paths.h
++++ b/src/include/optimizer/paths.h
+@@ -79,6 +79,32 @@ extern void generate_partitionwise_join_paths(PlannerInfo *root,
+  * indxpath.c
+  *	  routines to generate index paths
+  */
++#ifdef USE_INJECTION_POINTS
++/*
++ * Runtime payload for the planner-index-path-generated and
++ * planner-index-path-not-generated injection points, reported once per
++ * build_index_paths() call that reaches the path-construction decision.
++ *
++ * The flags are the inputs of that decision, so a callback can tell why no
++ * IndexPath was built instead of inferring it from the absence of one.  Like
++ * the add_path() payloads, this exposes planner-local objects to test and
++ * debug callbacks only; it is not a stable extension API.
++ */
++typedef struct PlannerIndexPathInjectionData
++{
++	RelOptInfo *rel;
++	IndexOptInfo *index;
++	Relids		required_outer;
++	bool		bitmap_only;	/* only bitmap scans were requested */
++	bool		has_index_clauses;
++	bool		has_useful_pathkeys;	/* forward scan order is useful */
++	bool		has_useful_backward_pathkeys;
++	bool		useful_predicate;
++	bool		index_only_scan;
++	int			npaths;			/* IndexPaths built, partial ones excluded */
++} PlannerIndexPathInjectionData;
++#endif
++
+ extern void create_index_paths(PlannerInfo *root, RelOptInfo *rel);
+ extern bool relation_has_unique_index_for(PlannerInfo *root, RelOptInfo *rel,
+ 										  List *restrictlist,
+diff --git a/src/tools/pgindent/typedefs.list b/src/tools/pgindent/typedefs.list
+index de766e0..4b9ca3b 100644
+--- a/src/tools/pgindent/typedefs.list
++++ b/src/tools/pgindent/typedefs.list
+@@ -2369,6 +2369,7 @@ PlanState
+ PlannedStmt
+ PlannedStmtOrigin
+ PlannerGlobal
++PlannerIndexPathInjectionData
+ PlannerInfo
+ PlannerParamItem
+ PlannerPathComparisonInjectionData
+-- 
+2.43.0
+

@@ -15,9 +15,10 @@ Limit  (cost=8.31..8.32 rows=1 width=28)
         ->  Index Scan using t_s_idx on t  (cost=0.29..8.30 rows=1 width=28)
               Index Cond: (s = 19)
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** Candidates on t_a_idx were built and 1 of them were kept for their relation, but the plan chosen above them does not use them.
+**Reference:** Verdict: built, kept in its relation, not used above it
+Candidates on t_a_idx were built and 1 of them were kept for their relation, but the plan chosen above them does not use them.
 
 Evidence P27.v0.q1:
 ```text
@@ -39,9 +40,10 @@ Limit  (cost=8.31..8.32 rows=1 width=28)
         ->  Index Scan using t_s_idx on t  (cost=0.29..8.30 rows=1 width=28)
               Index Cond: (s = 1009)
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** Candidates on t_a_idx were built and 1 of them were kept for their relation, but the plan chosen above them does not use them.
+**Reference:** Verdict: built, kept in its relation, not used above it
+Candidates on t_a_idx were built and 1 of them were kept for their relation, but the plan chosen above them does not use them.
 
 Evidence P27.v1.q1:
 ```text
@@ -60,9 +62,10 @@ SELECT * FROM t WHERE a BETWEEN 400 AND 8000
 Seq Scan on t  (cost=0.00..447.00 rows=15202 width=28)
   Filter: ((a >= 400) AND (a <= 8000))
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** Candidates existed and lost where they were compared: an IndexScan on t_a_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_a_idx was built and discarded in favour of SeqScan.
+**Reference:** Verdict: built, lost in its relation
+Candidates existed and lost where they were compared: an IndexScan on t_a_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_a_idx was built and discarded in favour of SeqScan.
 
 Evidence P02.v2.q2:
 ```text
@@ -81,9 +84,10 @@ SELECT * FROM t WHERE b < 95
 Seq Scan on t  (cost=0.00..397.00 rows=19000 width=28)
   Filter: (b < 95)
 ```
-**Question:** What happened to candidate paths on index t_b_c_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_b_c_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** Candidates existed and lost where they were compared: an IndexScan on t_b_c_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_b_c_idx was built and discarded in favour of SeqScan.
+**Reference:** Verdict: built, lost in its relation
+Candidates existed and lost where they were compared: an IndexScan on t_b_c_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_b_c_idx was built and discarded in favour of SeqScan.
 
 Evidence P03.v2.q2:
 ```text
@@ -102,9 +106,10 @@ SELECT * FROM t WHERE c LIKE 'c8%'
 Seq Scan on t  (cost=0.00..397.00 rows=2182 width=28)
   Filter: (c ~~ 'c8%'::text)
 ```
-**Question:** What happened to candidate paths on index t_b_c_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_b_c_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** Candidates existed and lost where they were compared: an IndexScan on t_b_c_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_b_c_idx was built and discarded in favour of SeqScan.
+**Reference:** Verdict: built, lost in its relation
+Candidates existed and lost where they were compared: an IndexScan on t_b_c_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_b_c_idx was built and discarded in favour of SeqScan.
 
 Evidence P08.v2.q1:
 ```text
@@ -123,9 +128,10 @@ SELECT * FROM t WHERE a = 5000 OR d = 60
 Seq Scan on t  (cost=0.00..447.00 rows=208 width=28)
   Filter: ((a = 5000) OR (d = 60))
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** Only bitmap-scan candidates on t_a_idx were built, and none of them reached the comparison of paths.
+**Reference:** Verdict: built for bitmap scans only, never compared
+Only bitmap-scan candidates on t_a_idx were built, and none of them reached the comparison of paths.
 
 Evidence P10.v2.q2:
 ```text
@@ -142,9 +148,10 @@ SELECT s FROM t
 ```text
 Seq Scan on t  (cost=0.00..347.00 rows=20000 width=4)
 ```
-**Question:** What happened to candidate paths on index t_s_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_s_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** Candidates existed and lost where they were compared: an IndexOnlyScan on t_s_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_s_idx was built and discarded in favour of SeqScan.
+**Reference:** Verdict: built, lost in its relation
+Candidates existed and lost where they were compared: an IndexOnlyScan on t_s_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_s_idx was built and discarded in favour of SeqScan.
 
 Evidence P20.v2.q1:
 ```text
@@ -165,9 +172,10 @@ Limit  (cost=779.19..779.22 rows=10 width=28)
         Sort Key: d
         ->  Seq Scan on t  (cost=0.00..347.00 rows=20000 width=28)
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare.
+**Reference:** Verdict: never built
+No candidate path on t_a_idx was ever built, so there was nothing to compare.
 
 Evidence P13.v0.q2:
 ```text
@@ -186,9 +194,10 @@ Limit  (cost=605.50..605.50 rows=3 width=28)
         Sort Key: d
         ->  Seq Scan on t  (cost=0.00..347.00 rows=20000 width=28)
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare.
+**Reference:** Verdict: never built
+No candidate path on t_a_idx was ever built, so there was nothing to compare.
 
 Evidence P13.v1.q2:
 ```text
@@ -205,9 +214,10 @@ SELECT * FROM t WHERE a + 0 = 999
 Seq Scan on t  (cost=0.00..447.00 rows=100 width=28)
   Filter: ((a + 0) = 999)
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare.
+**Reference:** Verdict: never built
+No candidate path on t_a_idx was ever built, so there was nothing to compare.
 
 Evidence P04.v2.q2:
 ```text
@@ -224,9 +234,10 @@ SELECT * FROM t WHERE a::numeric = 999
 Seq Scan on t  (cost=0.00..447.00 rows=100 width=28)
   Filter: ((a)::numeric = '999'::numeric)
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare.
+**Reference:** Verdict: never built
+No candidate path on t_a_idx was ever built, so there was nothing to compare.
 
 Evidence P05.v2.q2:
 ```text
@@ -243,9 +254,10 @@ SELECT * FROM t WHERE a <> 999
 Seq Scan on t  (cost=0.00..397.00 rows=19998 width=28)
   Filter: (a <> 999)
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare.
+**Reference:** Verdict: never built
+No candidate path on t_a_idx was ever built, so there was nothing to compare.
 
 Evidence P06.v2.q2:
 ```text
@@ -262,9 +274,10 @@ SELECT * FROM t WHERE c LIKE '%c8'
 Seq Scan on t  (cost=0.00..397.00 rows=2 width=28)
   Filter: (c ~~ '%c8'::text)
 ```
-**Question:** What happened to candidate paths on index t_b_c_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_b_c_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** No candidate path on t_b_c_idx was ever built, so there was nothing to compare.
+**Reference:** Verdict: never built
+No candidate path on t_b_c_idx was ever built, so there was nothing to compare.
 
 Evidence P08.v2.q2:
 ```text
@@ -281,9 +294,10 @@ SELECT * FROM t WHERE a NOT IN (5000, 6000)
 Seq Scan on t  (cost=0.00..397.00 rows=19996 width=28)
   Filter: (a <> ALL ('{5000,6000}'::integer[]))
 ```
-**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist?
+**Question:** What happened to candidate paths on index t_a_idx while this query was planned? Did a candidate exist and lose, or did none exist? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare.
+**Reference:** Verdict: never built
+No candidate path on t_a_idx was ever built, so there was nothing to compare.
 
 Evidence P11.v2.q2:
 ```text
@@ -304,9 +318,10 @@ Limit  (cost=0.29..0.83 rows=10 width=28)
 ```sql
 SELECT * FROM t ORDER BY d LIMIT 10
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order; for the changed one no path on t_a_idx is built.
+**Reference:** Divergence: t_a_idx built | t_a_idx not built
+The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order; for the changed one no path on t_a_idx is built.
 
 Evidence P13.v0.q1:
 ```text
@@ -333,9 +348,10 @@ Limit  (cost=0.29..0.45 rows=3 width=28)
 ```sql
 SELECT * FROM t ORDER BY d LIMIT 3
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order; for the changed one no path on t_a_idx is built.
+**Reference:** Divergence: t_a_idx built | t_a_idx not built
+The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order; for the changed one no path on t_a_idx is built.
 
 Evidence P13.v1.q1:
 ```text
@@ -362,9 +378,10 @@ Limit  (cost=0.29..0.83 rows=10 width=28)
 ```sql
 SELECT * FROM t ORDER BY a + 0 LIMIT 10
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order; for the changed one no path on t_a_idx is built.
+**Reference:** Divergence: t_a_idx built | t_a_idx not built
+The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order; for the changed one no path on t_a_idx is built.
 
 Evidence P14.v0.q1:
 ```text
@@ -391,9 +408,10 @@ Limit  (cost=0.29..0.45 rows=3 width=28)
 ```sql
 SELECT * FROM t ORDER BY a + 0 LIMIT 3
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order; for the changed one no path on t_a_idx is built.
+**Reference:** Divergence: t_a_idx built | t_a_idx not built
+The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order; for the changed one no path on t_a_idx is built.
 
 Evidence P14.v1.q1:
 ```text
@@ -420,9 +438,10 @@ Limit  (cost=0.29..0.83 rows=10 width=28)
 ```sql
 SELECT * FROM t ORDER BY a LIMIT 10
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order when scanned backward; for the changed one a path on t_a_idx is built because of a useful sort order.
+**Reference:** Divergence: t_a_idx built | t_a_idx built
+The first differing decision: for the original query a path on t_a_idx is built because of a useful sort order when scanned backward; for the changed one a path on t_a_idx is built because of a useful sort order.
 
 Evidence P15.v0.q1:
 ```text
@@ -453,9 +472,10 @@ Bitmap Heap Scan on t  (cost=4.62..82.45 rows=32 width=28)
 ```sql
 SELECT * FROM t WHERE a BETWEEN 400 AND 8000
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a kept SeqScan path is replaced by IndexScan on t_a_idx; for the changed one an IndexScan on t_a_idx path is discarded in favour of SeqScan.
+**Reference:** Divergence: SeqScan replaced | IndexScan[t_a_idx] discarded
+The first differing decision: for the original query a kept SeqScan path is replaced by IndexScan on t_a_idx; for the changed one an IndexScan on t_a_idx path is discarded in favour of SeqScan.
 
 Evidence P02.v2.q1:
 ```text
@@ -489,9 +509,10 @@ Bitmap Heap Scan on t  (cost=5.84..163.07 rows=200 width=28)
 ```sql
 SELECT * FROM t WHERE b < 95
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a kept SeqScan path is replaced by BitmapHeapScan on t_b_c_idx; for the changed one a BitmapHeapScan on t_b_c_idx path is discarded in favour of SeqScan.
+**Reference:** Divergence: SeqScan replaced | BitmapHeapScan[t_b_c_idx] discarded
+The first differing decision: for the original query a kept SeqScan path is replaced by BitmapHeapScan on t_b_c_idx; for the changed one a BitmapHeapScan on t_b_c_idx path is discarded in favour of SeqScan.
 
 Evidence P03.v2.q1:
 ```text
@@ -524,9 +545,10 @@ Bitmap Heap Scan on t  (cost=4.30..11.63 rows=2 width=28)
 ```sql
 SELECT * FROM t WHERE a + 0 = 999
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a path on t_a_idx is built because of a query condition usable with the index; for the changed one no path on t_a_idx is built.
+**Reference:** Divergence: t_a_idx built | t_a_idx not built
+The first differing decision: for the original query a path on t_a_idx is built because of a query condition usable with the index; for the changed one no path on t_a_idx is built.
 
 Evidence P04.v2.q1:
 ```text
@@ -558,9 +580,10 @@ Bitmap Heap Scan on t  (cost=4.30..11.63 rows=2 width=28)
 ```sql
 SELECT * FROM t WHERE a::numeric = 999
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a path on t_a_idx is built because of a query condition usable with the index; for the changed one no path on t_a_idx is built.
+**Reference:** Divergence: t_a_idx built | t_a_idx not built
+The first differing decision: for the original query a path on t_a_idx is built because of a query condition usable with the index; for the changed one no path on t_a_idx is built.
 
 Evidence P05.v2.q1:
 ```text
@@ -592,9 +615,10 @@ Bitmap Heap Scan on t  (cost=4.30..11.63 rows=2 width=28)
 ```sql
 SELECT * FROM t WHERE a <> 999
 ```
-**Question:** Where will the planner's decisions for the changed query first differ from those for the original one?
+**Question:** Where will the planner's decisions for the changed query first differ from those for the original one? Start the answer with a line 'Divergence: X | Y' giving the first differing decision for the first and the second query, each as '<index> built', '<index> not built', '<PathType>[<index>] kept', '<PathType>[<index>] discarded', '<PathType>[<index>] replaced', 'join path discarded before construction' or 'end' (omit [<index>] for a path without one); or 'Divergence: none'.
 
-**Reference:** The first differing decision: for the original query a path on t_a_idx is built because of a query condition usable with the index; for the changed one no path on t_a_idx is built.
+**Reference:** Divergence: t_a_idx built | t_a_idx not built
+The first differing decision: for the original query a path on t_a_idx is built because of a query condition usable with the index; for the changed one no path on t_a_idx is built.
 
 Evidence P06.v2.q1:
 ```text
@@ -624,9 +648,11 @@ Limit  (cost=0.29..0.83 rows=10 width=28)
 ```sql
 SELECT * FROM t ORDER BY d LIMIT 10
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare. When the planner decided whether to build a path on t_a_idx, none of the reasons to build one held: there was no query condition usable with the index, no useful sort order, no implied index predicate, and an index-only scan was not possible.
+**Reference:** Verdict: never built
+Inputs: none
+No candidate path on t_a_idx was ever built, so there was nothing to compare. When the planner decided whether to build a path on t_a_idx, none of the reasons to build one held: there was no query condition usable with the index, no useful sort order, no implied index predicate, and an index-only scan was not possible.
 
 Evidence P13.v0.q1:
 ```text
@@ -655,9 +681,11 @@ Limit  (cost=779.19..779.22 rows=10 width=28)
 ```sql
 SELECT * FROM t ORDER BY a LIMIT 10
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** A path on t_a_idx was built and is used in the final plan. A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
+**Reference:** Verdict: used in the final plan
+Inputs: useful order
+A path on t_a_idx was built and is used in the final plan. A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
 
 Evidence P13.v0.q2:
 ```text
@@ -684,9 +712,11 @@ Limit  (cost=0.29..0.83 rows=10 width=28)
 ```sql
 SELECT * FROM t ORDER BY a + 0 LIMIT 10
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare. When the planner decided whether to build a path on t_a_idx, none of the reasons to build one held: there was no query condition usable with the index, no useful sort order, no implied index predicate, and an index-only scan was not possible.
+**Reference:** Verdict: never built
+Inputs: none
+No candidate path on t_a_idx was ever built, so there was nothing to compare. When the planner decided whether to build a path on t_a_idx, none of the reasons to build one held: there was no query condition usable with the index, no useful sort order, no implied index predicate, and an index-only scan was not possible.
 
 Evidence P14.v0.q1:
 ```text
@@ -715,9 +745,11 @@ Limit  (cost=829.19..829.22 rows=10 width=32)
 ```sql
 SELECT * FROM t ORDER BY a LIMIT 10
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** A path on t_a_idx was built and is used in the final plan. A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
+**Reference:** Verdict: used in the final plan
+Inputs: useful order
+A path on t_a_idx was built and is used in the final plan. A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
 
 Evidence P14.v0.q2:
 ```text
@@ -745,9 +777,11 @@ Limit  (cost=0.29..57.39 rows=10 width=28)
 ```sql
 SELECT * FROM t WHERE b = 5 ORDER BY a + 0 LIMIT 10
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare. When the planner decided whether to build a path on t_a_idx, none of the reasons to build one held: there was no query condition usable with the index, no useful sort order, no implied index predicate, and an index-only scan was not possible.
+**Reference:** Verdict: never built
+Inputs: none
+No candidate path on t_a_idx was ever built, so there was nothing to compare. When the planner decided whether to build a path on t_a_idx, none of the reasons to build one held: there was no query condition usable with the index, no useful sort order, no implied index predicate, and an index-only scan was not possible.
 
 Evidence P26.v0.q1:
 ```text
@@ -776,9 +810,11 @@ Bitmap Heap Scan on t  (cost=4.62..82.45 rows=32 width=28)
 ```sql
 SELECT * FROM t WHERE a BETWEEN 400 AND 8000
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** Candidates existed and lost where they were compared: an IndexScan on t_a_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_a_idx was built and discarded in favour of SeqScan. A path on t_a_idx was built because of a query condition usable with the index. It lost on estimated cost: IndexScan was not better than SeqScan; BitmapHeapScan was not better than SeqScan.
+**Reference:** Verdict: built, lost in its relation
+Inputs: usable condition
+Candidates existed and lost where they were compared: an IndexScan on t_a_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_a_idx was built and discarded in favour of SeqScan. A path on t_a_idx was built because of a query condition usable with the index. It lost on estimated cost: IndexScan was not better than SeqScan; BitmapHeapScan was not better than SeqScan.
 
 Evidence P02.v2.q1:
 ```text
@@ -810,9 +846,11 @@ Seq Scan on t  (cost=0.00..447.00 rows=15202 width=28)
 ```sql
 SELECT * FROM t WHERE a BETWEEN 400 AND 415
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** A path on t_a_idx was built and is used in the final plan. A path on t_a_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the IndexScan on t_a_idx; IndexScan on t_a_idx lost to the BitmapHeapScan on t_a_idx.
+**Reference:** Verdict: used in the final plan
+Inputs: usable condition
+A path on t_a_idx was built and is used in the final plan. A path on t_a_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the IndexScan on t_a_idx; IndexScan on t_a_idx lost to the BitmapHeapScan on t_a_idx.
 
 Evidence P02.v2.q2:
 ```text
@@ -846,9 +884,11 @@ Bitmap Heap Scan on t  (cost=5.84..163.07 rows=200 width=28)
 ```sql
 SELECT * FROM t WHERE b < 95
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_b_c_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_b_c_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** Candidates existed and lost where they were compared: an IndexScan on t_b_c_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_b_c_idx was built and discarded in favour of SeqScan. A path on t_b_c_idx was built because of a query condition usable with the index. It lost on estimated cost: IndexScan was not better than SeqScan; BitmapHeapScan was not better than SeqScan.
+**Reference:** Verdict: built, lost in its relation
+Inputs: usable condition
+Candidates existed and lost where they were compared: an IndexScan on t_b_c_idx was built and discarded in favour of SeqScan; a BitmapHeapScan on t_b_c_idx was built and discarded in favour of SeqScan. A path on t_b_c_idx was built because of a query condition usable with the index. It lost on estimated cost: IndexScan was not better than SeqScan; BitmapHeapScan was not better than SeqScan.
 
 Evidence P03.v2.q1:
 ```text
@@ -879,9 +919,11 @@ Seq Scan on t  (cost=0.00..397.00 rows=19000 width=28)
 ```sql
 SELECT * FROM t WHERE b = 77
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_b_c_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_b_c_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** A path on t_b_c_idx was built and is used in the final plan. A path on t_b_c_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the BitmapHeapScan on t_b_c_idx.
+**Reference:** Verdict: used in the final plan
+Inputs: usable condition
+A path on t_b_c_idx was built and is used in the final plan. A path on t_b_c_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the BitmapHeapScan on t_b_c_idx.
 
 Evidence P03.v2.q2:
 ```text
@@ -914,9 +956,11 @@ Bitmap Heap Scan on t  (cost=4.30..11.63 rows=2 width=28)
 ```sql
 SELECT * FROM t WHERE a + 0 = 999
 ```
-**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why?
+**Question:** If the query is changed as shown, what will happen to candidate paths on t_a_idx, and why? Start the answer with a line 'Verdict: V', V being one of: used in the final plan; built, lost in its relation; built, kept in its relation, not used above it; built for bitmap scans only, never compared; never built; not considered. Then a line 'Inputs: L', L being the reasons a path on the index was built, from: usable condition, useful order, useful backward order, implied predicate, index-only scan (comma-separated), or 'none' if no path was built.
 
-**Reference:** No candidate path on t_a_idx was ever built, so there was nothing to compare. When the planner decided whether to build a path on t_a_idx, none of the reasons to build one held: there was no query condition usable with the index, no useful sort order, no implied index predicate, and an index-only scan was not possible.
+**Reference:** Verdict: never built
+Inputs: none
+No candidate path on t_a_idx was ever built, so there was nothing to compare. When the planner decided whether to build a path on t_a_idx, none of the reasons to build one held: there was no query condition usable with the index, no useful sort order, no implied index predicate, and an index-only scan was not possible.
 
 Evidence P04.v2.q1:
 ```text
@@ -944,9 +988,10 @@ Limit  (cost=779.19..779.22 rows=10 width=28)
         Sort Key: d
         ->  Seq Scan on t  (cost=0.00..347.00 rows=20000 width=28)
 ```
-**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query.
+**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query. Start the answer with a line 'SQL: <the changed query>'.
 
-**Reference:** For example: SELECT * FROM t ORDER BY a LIMIT 10 . A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
+**Reference:** SQL: SELECT * FROM t ORDER BY a LIMIT 10
+A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
 
 Evidence P13.v0.q2:
 ```text
@@ -971,9 +1016,10 @@ Limit  (cost=605.50..605.50 rows=3 width=28)
         Sort Key: d
         ->  Seq Scan on t  (cost=0.00..347.00 rows=20000 width=28)
 ```
-**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query.
+**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query. Start the answer with a line 'SQL: <the changed query>'.
 
-**Reference:** For example: SELECT * FROM t ORDER BY a LIMIT 3 . A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
+**Reference:** SQL: SELECT * FROM t ORDER BY a LIMIT 3
+A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
 
 Evidence P13.v1.q2:
 ```text
@@ -998,9 +1044,10 @@ Limit  (cost=829.19..829.22 rows=10 width=32)
         Sort Key: ((a + 0))
         ->  Seq Scan on t  (cost=0.00..397.00 rows=20000 width=32)
 ```
-**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query.
+**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query. Start the answer with a line 'SQL: <the changed query>'.
 
-**Reference:** For example: SELECT * FROM t ORDER BY a LIMIT 10 . A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
+**Reference:** SQL: SELECT * FROM t ORDER BY a LIMIT 10
+A path on t_a_idx was built because of a useful sort order. Nothing it was compared with beat it.
 
 Evidence P14.v0.q2:
 ```text
@@ -1023,9 +1070,10 @@ SELECT * FROM t WHERE a BETWEEN 400 AND 8000
 Seq Scan on t  (cost=0.00..447.00 rows=15202 width=28)
   Filter: ((a >= 400) AND (a <= 8000))
 ```
-**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query.
+**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query. Start the answer with a line 'SQL: <the changed query>'.
 
-**Reference:** For example: SELECT * FROM t WHERE a BETWEEN 400 AND 415 . A path on t_a_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the IndexScan on t_a_idx; IndexScan on t_a_idx lost to the BitmapHeapScan on t_a_idx.
+**Reference:** SQL: SELECT * FROM t WHERE a BETWEEN 400 AND 415
+A path on t_a_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the IndexScan on t_a_idx; IndexScan on t_a_idx lost to the BitmapHeapScan on t_a_idx.
 
 Evidence P02.v2.q2:
 ```text
@@ -1053,9 +1101,10 @@ SELECT * FROM t WHERE b < 95
 Seq Scan on t  (cost=0.00..397.00 rows=19000 width=28)
   Filter: (b < 95)
 ```
-**Question:** What single change to this query would make the planner use index t_b_c_idx? Give the changed query.
+**Question:** What single change to this query would make the planner use index t_b_c_idx? Give the changed query. Start the answer with a line 'SQL: <the changed query>'.
 
-**Reference:** For example: SELECT * FROM t WHERE b = 77 . A path on t_b_c_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the BitmapHeapScan on t_b_c_idx.
+**Reference:** SQL: SELECT * FROM t WHERE b = 77
+A path on t_b_c_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the BitmapHeapScan on t_b_c_idx.
 
 Evidence P03.v2.q2:
 ```text
@@ -1082,9 +1131,10 @@ SELECT * FROM t WHERE a + 0 = 999
 Seq Scan on t  (cost=0.00..447.00 rows=100 width=28)
   Filter: ((a + 0) = 999)
 ```
-**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query.
+**Question:** What single change to this query would make the planner use index t_a_idx? Give the changed query. Start the answer with a line 'SQL: <the changed query>'.
 
-**Reference:** For example: SELECT * FROM t WHERE a = 999 . A path on t_a_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the IndexScan on t_a_idx; IndexScan on t_a_idx lost to the BitmapHeapScan on t_a_idx.
+**Reference:** SQL: SELECT * FROM t WHERE a = 999
+A path on t_a_idx was built because of a query condition usable with the index. In the comparisons it won: SeqScan lost to the IndexScan on t_a_idx; IndexScan on t_a_idx lost to the BitmapHeapScan on t_a_idx.
 
 Evidence P04.v2.q2:
 ```text

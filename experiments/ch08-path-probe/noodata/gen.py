@@ -13,6 +13,11 @@ injection points and the noodata_trace module, and writes:
 
 Usage: gen.py --dsn "host=/tmp port=5499 dbname=postgres" --out DIR
        gen.py --dsn ... --out DIR --explain-only   (plans only, no trace)
+       gen.py --dsn ... --out DIR --pairs pairs-v1.json
+
+A pair file entry either gives q1/q2 directly, or gives q1/q2 as format
+templates plus "variants", a list of parameter dicts; each variant becomes a
+pair with id "<id>.v<n>".  Optional "family" and "focus" are passed through.
 """
 import argparse
 import hashlib
@@ -286,16 +291,36 @@ def questions_for_query(qid, split, fates):
     return qs
 
 
+PASS_THROUGH = ("template", "family", "focus", "params")
+
+
+def expand_pairs(entries):
+    out = []
+    for p in entries:
+        if "variants" not in p:
+            out.append(p)
+            continue
+        for i, params in enumerate(p["variants"]):
+            q = {k: v for k, v in p.items() if k != "variants"}
+            q.update(id=f"{p['id']}.v{i}", template=p["id"], params=params,
+                     q1=p["q1"].format(**params), q2=p["q2"].format(**params))
+            if "focus" in p:
+                q["focus"] = p["focus"].format(**params)
+            out.append(q)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dsn", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--explain-only", action="store_true")
+    ap.add_argument("--pairs", default=os.path.join(HERE, "pairs.json"))
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    with open(os.path.join(HERE, "pairs.json")) as f:
-        pairs = json.load(f)
+    with open(args.pairs) as f:
+        pairs = expand_pairs(json.load(f))
     with open(os.path.join(HERE, "setup.sql")) as f:
         schema_sql = f.read()
 
@@ -340,6 +365,7 @@ def main():
             traces[v] = events
 
             common = {"id": qid, "pair_id": p["id"], "variant": v,
+                      **{k: p[k] for k in PASS_THROUGH if k in p},
                       "split": split, "category": p["category"], "sql": sql,
                       "schema": schema_sql,
                       "statistics": {t: stats[t] for t in tables}}
@@ -369,7 +395,9 @@ def main():
             traces["q1"], traces["q2"],
             lambda e: json.dumps({k: v for k, v in e.items() if k != "plan"},
                                  sort_keys=True))
-        pair_rec = {"pair_id": p["id"], "split": split,
+        pair_rec = {"pair_id": p["id"],
+                    **{k: p[k] for k in PASS_THROUGH if k in p},
+                    "split": split,
                     "category": p["category"], "diff": p["diff"],
                     "q1": p["q1"], "q2": p["q2"],
                     "events": [len(traces["q1"]), len(traces["q2"])],

@@ -1,0 +1,34 @@
+{
+  "counts": {
+    "by_event": {
+      "ACCEPTED": 215,
+      "DISPLACED": 57,
+      "INDEX_PATH_GENERATED": 52,
+      "INDEX_PATH_NOT_GENERATED": 287,
+      "PRECHECK_REJECTED": 28,
+      "REJECTED": 34
+    },
+    "events": 673,
+    "queries": 54,
+    "questions": 1157,
+    "verdicts": {
+      "CHOSEN": 36,
+      "GENERATED_NOT_SUBMITTED": 1,
+      "NEVER_GENERATED": 286,
+      "NOT_EXAMINED": 52,
+      "PRUNED": 10,
+      "SURVIVED_NOT_CHOSEN": 1
+    }
+  },
+  "pairs": 27,
+  "server": "PostgreSQL 20devel on x86_64-pc-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
+  "session_gucs": {
+    "client_min_messages": "notice",
+    "jit": "off",
+    "max_parallel_workers_per_gather": "0"
+  },
+  "splits": {
+    "test": 3,
+    "train": 24
+  }
+}

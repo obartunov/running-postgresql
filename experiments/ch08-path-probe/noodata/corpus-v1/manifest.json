@@ -1,0 +1,54 @@
+{
+  "by_kind": {
+    "difference": 88,
+    "divergence": 88,
+    "fate": 176,
+    "predict": 176,
+    "predict_divergence": 88,
+    "repair": 58,
+    "why": 176
+  },
+  "by_level": {
+    "L0": 264,
+    "L1": 264,
+    "L2": 322
+  },
+  "folds": {
+    "expression_index": {
+      "test_interp": {
+        "L0": 72,
+        "L1": 72,
+        "L2": 88
+      },
+      "test_transfer": {
+        "L0": 18,
+        "L1": 18,
+        "L2": 24
+      },
+      "train": {
+        "L0": 174,
+        "L1": 174,
+        "L2": 210
+      }
+    },
+    "ordering": {
+      "test_interp": {
+        "L0": 54,
+        "L1": 54,
+        "L2": 67
+      },
+      "test_transfer": {
+        "L0": 90,
+        "L1": 90,
+        "L2": 105
+      },
+      "train": {
+        "L0": 120,
+        "L1": 120,
+        "L2": 150
+      }
+    }
+  },
+  "items": 850,
+  "raw": "data-v1"
+}

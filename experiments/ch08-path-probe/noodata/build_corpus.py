@@ -303,6 +303,54 @@ def event_words(e):
             f"favour of {e['competitor_path_type']}{cidx}")
 
 
+INPUT_NAMES = {"has_index_clauses": "usable condition",
+               "has_useful_pathkeys": "useful order",
+               "has_useful_backward_pathkeys": "useful backward order",
+               "useful_predicate": "implied predicate",
+               "index_only_scan": "index-only scan"}
+
+VERDICT_LINE = ("Start the answer with a line 'Verdict: V', V being one of: "
+                + "; ".join(VERDICT_SHORT.values()) + ".")
+INPUTS_LINE = ("Then a line 'Inputs: L', L being the reasons a path on the "
+               "index was built, from: " + ", ".join(INPUT_NAMES.values())
+               + " (comma-separated), or 'none' if no path was built.")
+DIVERGENCE_LINE = ("Start the answer with a line 'Divergence: X | Y' giving "
+                   "the first differing decision for the first and the second "
+                   "query, each as '<index> built', '<index> not built', "
+                   "'<PathType>[<index>] kept', '<PathType>[<index>] "
+                   "discarded', '<PathType>[<index>] replaced', 'join path "
+                   "discarded before construction' or 'end' (omit [<index>] "
+                   "for a path without one); or 'Divergence: none'.")
+REPAIR_LINE = "Start the answer with a line 'SQL: <the changed query>'."
+
+
+def gold_inputs(fate):
+    gen = [b for b in fate["births"] if b["event"] == "INDEX_PATH_GENERATED"]
+    names = [n for k, n in INPUT_NAMES.items() if any(b[k] for b in gen)]
+    return names or ["none"]
+
+
+def divergence_side(e):
+    if e is None:
+        return "end"
+    if e["event"] == "INDEX_PATH_GENERATED":
+        return f"{e['index']} built"
+    if e["event"] == "INDEX_PATH_NOT_GENERATED":
+        return f"{e['index']} not built"
+    if e["event"] == "PRECHECK_REJECTED":
+        return "join path discarded before construction"
+    p = e["path_type"] + (f"[{e['index']}]" if e.get("index") else "")
+    return p + " " + {"ACCEPTED": "kept", "REJECTED": "discarded",
+                      "DISPLACED": "replaced"}[e["event"]]
+
+
+def gold_divergence(pair):
+    d = pair["first_structural_divergence"]
+    if d is None:
+        return "none"
+    return divergence_side(d["q1_event"]) + " | " + divergence_side(d["q2_event"])
+
+
 def divergence_answer(pair):
     d = pair["first_structural_divergence"]
     if d is None:
@@ -445,6 +493,38 @@ def build(raw, out, folds):
                           "reference_sql": recs[strong]["sql"],
                           "grading": "execute: plan the proposed SQL and "
                                      f"check that {focus} is in the final plan"})
+
+    # A scored header on the first lines of every answer, and the matching
+    # format instruction in every question, identical for A, B and a base
+    # model evaluated zero-shot.
+    for it in items:
+        k = it["kind"]
+        if k in ("fate", "why", "predict"):
+            qid = it["parts"][1][1] if k == "predict" else it["parts"][0][1]
+            fate = fates[qid]["indexes"][it["focus"]]
+            it["gold"] = {"verdict": VERDICT_SHORT[fate["verdict"]],
+                          "inputs": gold_inputs(fate)}
+            head = f"Verdict: {it['gold']['verdict']}\n"
+            fmt = VERDICT_LINE
+            if k != "fate":
+                head += "Inputs: " + ", ".join(it["gold"]["inputs"]) + "\n"
+                fmt += " " + INPUTS_LINE
+        elif k in ("divergence", "predict_divergence"):
+            it["gold"] = {"divergence": gold_divergence(pairs[it["pair_id"]])}
+            head = f"Divergence: {it['gold']['divergence']}\n"
+            fmt = DIVERGENCE_LINE
+        elif k == "repair":
+            it["gold"] = {"sql": it["reference_sql"]}
+            head = f"SQL: {it['reference_sql']}\n"
+            fmt = REPAIR_LINE
+            it["answer"] = it["answer"].replace(
+                f"For example: {it['reference_sql']} . ", "")
+        else:
+            it["gold"] = None
+            head, fmt = "", ""
+        it["answer"] = head + it["answer"]
+        if fmt:
+            it["question"] += " " + fmt
 
     for it in items:
         for tok in FORBIDDEN:

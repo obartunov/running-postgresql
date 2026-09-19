@@ -1,0 +1,4 @@
+comment = 'planner trajectory events as JSON lines (test/demo callback)'
+default_version = '0.1'
+module_pathname = '$libdir/noodata_trace'
+relocatable = true

@@ -1,4 +1,4 @@
-From b9c5d584e3729b9fc46c70f0330cc607e1ff49d1 Mon Sep 17 00:00:00 2001
+From 054c24cc5e3a18a95b1c1d6d97435e9b955f8541 Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
 Date: Sat, 19 Sep 2026 14:13:02 +0400
 Subject: [PATCH] planner: add injection points for index path generation

@@ -1,4 +1,4 @@
-From ad877668e2d51186c91f4f827887a8400c0615df Mon Sep 17 00:00:00 2001
+From 7cfca925ae844b9aef165110252104a89eb3c715 Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
 Date: Tue, 8 Sep 2026 17:03:03 +0000
 Subject: [PATCH 2/2] injection_points: add planner path-prune notice action
@@ -43,11 +43,11 @@ This is a test helper, not a planner reporting API.
  create mode 100644 src/test/modules/injection_points/t/001_planner_path_prune.pl
 
 diff --git a/src/test/modules/injection_points/Makefile b/src/test/modules/injection_points/Makefile
-index 3b136ad..9a2a320 100644
+index 9d8b4b3..3ce09bb 100644
 --- a/src/test/modules/injection_points/Makefile
 +++ b/src/test/modules/injection_points/Makefile
-@@ -10,6 +10,8 @@ DATA = injection_points--1.0.sql
- PGFILEDESC = "injection_points - facility for injection points"
+@@ -12,6 +12,8 @@ PGFILEDESC = "injection_points - facility for injection points"
+ EXTRA_INSTALL = contrib/test_decoding
  
  REGRESS = injection_points hashagg reindex_conc vacuum
 +
@@ -311,7 +311,7 @@ index 66d8158..e24cb5e 100644
  		elog(ERROR, "incorrect action \"%s\" for injection point creation", action);
  
 diff --git a/src/test/modules/injection_points/meson.build b/src/test/modules/injection_points/meson.build
-index aff516b..8ef1389 100644
+index 80a09f3..9b9281d 100644
 --- a/src/test/modules/injection_points/meson.build
 +++ b/src/test/modules/injection_points/meson.build
 @@ -41,6 +41,11 @@ tests += {

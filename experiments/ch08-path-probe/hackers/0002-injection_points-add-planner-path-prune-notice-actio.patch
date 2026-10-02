@@ -1,4 +1,4 @@
-From 7cfca925ae844b9aef165110252104a89eb3c715 Mon Sep 17 00:00:00 2001
+From cd6a755224f46d6cbd948e5177c609fc2205c584 Mon Sep 17 00:00:00 2001
 From: r2d2 <r2d2@localhost>
 Date: Tue, 8 Sep 2026 17:03:03 +0000
 Subject: [PATCH 2/2] injection_points: add planner path-prune notice action
@@ -38,8 +38,8 @@ This is a test helper, not a planner reporting API.
  src/test/modules/injection_points/Makefile    |   2 +
  .../injection_points/injection_points.c       | 220 ++++++++++++++++++
  src/test/modules/injection_points/meson.build |   5 +
- .../t/001_planner_path_prune.pl               |  95 ++++++++
- 4 files changed, 322 insertions(+)
+ .../t/001_planner_path_prune.pl               | 128 ++++++++++
+ 4 files changed, 355 insertions(+)
  create mode 100644 src/test/modules/injection_points/t/001_planner_path_prune.pl
 
 diff --git a/src/test/modules/injection_points/Makefile b/src/test/modules/injection_points/Makefile
@@ -328,10 +328,10 @@ index 80a09f3..9b9281d 100644
        'basic',
 diff --git a/src/test/modules/injection_points/t/001_planner_path_prune.pl b/src/test/modules/injection_points/t/001_planner_path_prune.pl
 new file mode 100644
-index 0000000..c3401b5
+index 0000000..d2a2b3c
 --- /dev/null
 +++ b/src/test/modules/injection_points/t/001_planner_path_prune.pl
-@@ -0,0 +1,95 @@
+@@ -0,0 +1,128 @@
 +
 +# Copyright (c) 2026, PostgreSQL Global Development Group
 +
@@ -424,6 +424,39 @@ index 0000000..c3401b5
 +	$err2,
 +	qr/PLANNER_PATH event=precheck-reject/,
 +	'a precheck rejection is reported');
++
++# add_path() frees a displaced path unless it is an IndexPath, so the
++# displace point is only safe if it fires before that pfree.  An indexed
++# lookup has the seqscan displaced by the indexscan.  Compare what the
++# displace event reports for the old path with what the same path reported
++# when it was accepted: a callback reading freed memory reports garbage or
++# crashes the backend.
++$node->safe_psql(
++	'postgres', q{
++CREATE TABLE ppt (id int, v int);
++INSERT INTO ppt SELECT g, g FROM generate_series(1, 2000) g;
++CREATE INDEX ppt_id_idx ON ppt (id);
++ANALYZE ppt;
++});
++my $displace = q{
++SELECT injection_points_set_local();
++SELECT injection_points_attach(name, 'path-prune-notice')
++FROM (VALUES
++    ('planner-add-path-accept'),
++    ('planner-add-path-displace')
++) AS p(name);
++SET max_parallel_workers_per_gather = 0;
++EXPLAIN (COSTS OFF) SELECT * FROM ppt WHERE id = 42;
++};
++my ($r3, $out3, $err3) = $node->psql('postgres', $displace);
++is($r3, 0, 'query with the displace point attached succeeds');
++my @accepted = $err3 =~
++  /event=accept rel=\{\d+\} new_type=SeqScan new_index=0 new_startup=(\S+) new_total=(\S+) new_rows=(\S+)/;
++my @displaced = $err3 =~
++  /event=displace rel=\{\d+\} new_type=IndexScan .* old_type=SeqScan old_index=0 old_startup=(\S+) old_total=(\S+) old_rows=(\S+)/;
++is(scalar @displaced, 3, 'a seqscan displaced by an indexscan is reported');
++is_deeply(\@displaced, \@accepted,
++	'the displaced seqscan is reported as it was when accepted');
 +
 +$node->stop;
 +done_testing();

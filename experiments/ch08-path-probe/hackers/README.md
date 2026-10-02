@@ -58,7 +58,7 @@ that understands those payloads and prints one NOTICE per event, plus a TAP
 test asserting structural facts only (not costs).  The existing `notice`
 action would print garbage for a typed payload.
 
-    ../noodata/0003-planner-add-injection-points-for-index-path-generati.patch
+    0003-planner-add-injection-points-for-index-path-generati.patch
 
 Two points at the end of `build_index_paths()`:
 `planner-index-path-generated`, `planner-index-path-not-generated`, with
@@ -72,10 +72,12 @@ supported, `amoptionalkey` without a leading-column clause, OR arms with no
 matching clause) produce no event: a consumer must read that as "not
 examined", not as "not generated".
 
-`0001` + `0002` are the upstream candidate; the cover letter for them is in
-`0000-cover-letter.txt`, review notes in `NOTES-v3.md`, and a runnable demo
-in `demo/`.  `0003` is a separate follow-up and can be discussed
-independently of them.
+`0001` + `0002` form the initial upstream submission; the cover letter for
+them is in `0000-cover-letter.txt`, review notes in `NOTES-v3.md`, and a
+runnable demo in `demo/`.  `0003` is an independent follow-up that exposes
+whether `build_index_paths()` generated an `IndexPath`; it is kept in the
+same patch series for reproducibility but does not need to be reviewed or
+committed together with `0001` and `0002`.
 
 ## Invariant
 
@@ -101,7 +103,7 @@ Reproduce the tree:
 git clone https://git.postgresql.org/git/postgresql.git pg && cd pg
 git checkout -b planner-injection-points c62b330
 R=<this repo>/experiments/ch08-path-probe
-git am $R/hackers/0001-*.patch $R/hackers/0002-*.patch $R/noodata/0003-*.patch
+git am $R/hackers/0001-*.patch $R/hackers/0002-*.patch $R/hackers/0003-*.patch
 ./configure --enable-injection-points --enable-tap-tests --enable-cassert
 make && make -C src/test/modules/injection_points check
 ```

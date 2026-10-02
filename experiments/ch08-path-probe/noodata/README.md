@@ -9,7 +9,7 @@
 
 ```text
 ../hackers/0001, 0002      существующая серия (add_path, без изменений)
-core 0003 (ветка noodata-v0 в дереве PostgreSQL)
+../hackers/0003            follow-up к серии (ветка noodata-v0 в дереве PostgreSQL)
                            planner-index-path-generated /
                            planner-index-path-not-generated
                            в конце build_index_paths()
